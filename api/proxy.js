@@ -3,8 +3,13 @@ const axios = require('axios');
 
 module.exports = async (req, res) => {
     try {
-        const targetUrl = 'https://www.h5games4u.com/games/Brainrot-Escape-Diamond-Quest/index.html?cid=yyg';
+        // Get the game URL from the ?url= parameter
+        const targetUrl = req.query.url;
         
+        if (!targetUrl) {
+            return res.status(400).send('❌ Missing ?url= parameter');
+        }
+
         const response = await axios.get(targetUrl, {
             headers: {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
@@ -16,36 +21,24 @@ module.exports = async (req, res) => {
 
         let html = response.data;
 
-        // 1. Inject <base> tag so game assets load correctly
+        // Inject <base> tag dynamically
+        const urlObj = new URL(targetUrl);
+        const baseHref = urlObj.origin + urlObj.pathname.substring(0, urlObj.pathname.lastIndexOf('/') + 1);
         if (html.includes('<head>')) {
-            html = html.replace('<head>', '<head><base href="https://www.h5games4u.com/games/Brainrot-Escape-Diamond-Quest/">');
+            html = html.replace('<head>', `<head><base href="${baseHref}">`);
         }
 
-        // 2. Strip Meta CSP tags
+        // Strip CSP and inject the anti-popup nuke
         html = html.replace(/<meta[^>]*http-equiv="Content-Security-Policy"[^>]*>/gi, '');
 
-        // 🚨 3. THE FIX: Inject a script to nuke the popup dynamically 🚨
         const antiIframeNuke = `
+        <style>#modal, .modal-overlay { display: none !important; opacity: 0 !important; pointer-events: none !important; }</style>
         <script>
-            // Forcefully hide the modal via CSS immediately
-            const style = document.createElement('style');
-            style.innerHTML = '#modal, .modal-overlay { display: none !important; opacity: 0 !important; visibility: hidden !important; pointer-events: none !important; }';
-            document.head.appendChild(style);
-
-            // Watch for the modal being added to the DOM and delete it
             const observer = new MutationObserver(() => {
                 const modal = document.getElementById('modal');
-                if (modal) {
-                    modal.remove();
-                }
+                if (modal) modal.remove();
             });
-            
-            // Start observing once the body is ready
-            document.addEventListener('DOMContentLoaded', () => {
-                observer.observe(document.body, { childList: true, subtree: true });
-            });
-
-            // Fallback: Auto-click the close/confirm buttons if they somehow show up
+            document.addEventListener('DOMContentLoaded', () => observer.observe(document.body, { childList: true, subtree: true }));
             setInterval(() => {
                 const btn = document.getElementById('confirmBtn') || document.getElementById('closeBtn');
                 if (btn) btn.click();
@@ -53,12 +46,10 @@ module.exports = async (req, res) => {
         </script>
         `;
 
-        // Inject the nuke script right after <head>
         if (html.includes('<head>')) {
             html = html.replace('<head>', '<head>' + antiIframeNuke);
         }
 
-        // Send the modified HTML back
         res.setHeader('Content-Type', 'text/html');
         res.setHeader('Access-Control-Allow-Origin', '*');
         res.removeHeader('X-Frame-Options');
