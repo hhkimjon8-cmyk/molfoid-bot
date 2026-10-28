@@ -22,5 +22,11 @@
         "description": "A simple drawing game for everyone!",
         "url": "https://www.yad.com/games/Draw-The-Hill/index.html?yad",
         "thumbnail": "https://www.yad.com/cdn-cgi/image/quality=78,format=auto/thumb/Just-Draw.jpg"
+    },
+    "Granny Granny": {
+        "name": "Granny Granny",
+        "description": "horror horrors",
+        "url": "https://cdn.yad.com/Granny-Granny/index.html?yad",
+        "thumbnail": "https://www.yad.com/cdn-cgi/image/quality=78,format=auto/thumb/Granny-Granny.jpg"
     }
 }
