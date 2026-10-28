@@ -18,6 +18,7 @@ const { searchWallpapers } = require('../utils/wallpaper');
 const { searchIMDb } = require('../utils/tvshow'); 
 const { purgeMessages } = require('../utils/function'); 
 const { getGameList, getGameUrls } = require('../utils/emulator'); 
+const { getWebGameList, getWebGame } = require('../utils/webgame');
 
 process.env.YTDL_NO_UPDATE = '1';
 
@@ -235,10 +236,12 @@ module.exports = {
     if (message.author.bot || message.system) return;
 
     // ==========================================
-    // 🚨 PRO PREFIX COMMANDS (!ban, !warn, !game, !help) 🚨
+    // 🚨 PRO PREFIX COMMANDS (Server & DM Compatible) 🚨
     // ==========================================
+    let directPlaylistQuery = null;
+
     const PREFIX = '!';
-    if (message.content.startsWith(PREFIX) && message.guild) {
+    if (message.content.startsWith(PREFIX)) {
       const args = message.content.slice(PREFIX.length).trim().split(/ +/);
       const command = args.shift().toLowerCase();
 
@@ -249,10 +252,10 @@ module.exports = {
           .setTitle('📖 Molfoid Command List')
           .setDescription('Here is everything I can do, moron. Use them wisely.')
           .addFields(
-            { name: '🛠️ Moderation', value: '`!ban @user 1h [reason]` - Temp ban\n`!warn @user [reason]` - Log a warning\n`!purge 50` - Bulk delete msgs' },
+            { name: '🛠️ Moderation (Servers Only)', value: '`!ban @user 1h [reason]` - Temp ban\n`!warn @user [reason]` - Log a warning\n`!purge 50` - Bulk delete msgs' },
             { name: '💻 Utilities', value: '`!github <repo_url>` - Latest release\n`!ping` - Bot latency' },
-            { name: '🎵 Music', value: '`song <name>` - Search & play\n`playlist <name>` - Generate playlist\n`!play <name>` - Direct play' },
-            { name: '🎮 Games', value: '`!game` - List GBA games\n`!game <name>` - Play a GBA game' },
+            { name: '🎵 Music', value: '`!playlist <name>` - Generate playlist\n`song <name>` - Search & play\n`!play <name>` - Direct play' },
+            { name: '🎮 Games', value: '`!game` - List GBA games\n`!game <name>` - Play a GBA game\n`!web game` - Play Web Games' },
             { name: '🎬 Media', value: '`wallpaper <query>` - Find wallpapers\n`movie <query>` - Search IMDb\n`search <query> yt` - YouTube search' },
             { name: '🤖 AI Chat', value: 'Just mention me or send a DM! (Or use `reset` to clear memory)' }
           )
@@ -265,140 +268,20 @@ module.exports = {
         return message.reply(`🏓 Pong! Latency: \`${Math.round(message.client.ws.ping)}ms\``);
       }
 
-      // --- !purge ---
-      if (command === 'purge' || command === 'clear') {
-        return purgeMessages(message, args);
-      }
-
-      // --- !github ---
-      if (command === 'github' || command === 'gh') {
-        const repoUrl = args[0];
-        if (!repoUrl || !repoUrl.includes('github.com')) {
-          return message.reply('❌ Provide a valid GitHub URL (e.g., `!github https://github.com/discordjs/discord.js`)');
-        }
-        
-        const match = repoUrl.match(/github\.com\/([^/]+)\/([^/]+)/);
-        if (!match) return message.reply('❌ Invalid GitHub URL format.');
-        
-        const [, owner, repo] = match;
-        const cleanRepo = repo.replace(/\.git$/, '');
-
-        try {
-          const res = await axios.get(`https://api.github.com/repos/${owner}/${cleanRepo}/releases/latest`);
-          const release = res.data;
-          
-          const embed = new EmbedBuilder()
-            .setColor(0x24292e)
-            .setTitle(`📦 Latest Release: ${release.name || release.tag_name}`)
-            .setURL(release.html_url)
-            .setAuthor({ name: `${owner}/${cleanRepo}`, iconURL: 'https://github.githubassets.com/favicons/favicon.png' })
-            .setDescription(release.body ? release.body.substring(0, 500) + '...' : 'No release notes provided.')
-            .setFooter({ text: `Published on ${new Date(release.published_at).toDateString()}` });
-            
-          return message.reply({ embeds: [embed] });
-        } catch (error) {
-          return message.reply(`❌ Could not fetch releases for \`${owner}/${cleanRepo}\`. Make sure the repo exists and has releases.`);
-        }
-      }
-
-      // --- !warn ---
-      if (command === 'warn') {
-        if (!message.member.permissions.has(PermissionFlagsBits.ModerateMembers)) {
-          return message.reply('❌ You need the **Moderate Members** permission to warn users.');
-        }
-        const targetUser = message.mentions.users.first();
-        if (!targetUser) return message.reply('❌ Mention a user to warn. Usage: `!warn @user [reason]`');
-        
-        const reason = args.slice(1).join(' ') || 'No reason provided';
-        
-        if (!warnings.has(targetUser.id)) warnings.set(targetUser.id, []);
-        warnings.get(targetUser.id).push(reason);
-        const userWarns = warnings.get(targetUser.id).length;
-
-        try {
-          await targetUser.send(`⚠️ You have been warned in **${message.guild.name}** by ${message.author.tag}.\n**Reason:** ${reason}\n**Total Warnings:** ${userWarns}`);
-        } catch { /* DMs closed */ }
-
-        const embed = new EmbedBuilder()
-          .setColor(0xff9900)
-          .setTitle('⚠️ User Warned')
-          .setDescription(`${targetUser.tag} has been warned.`)
-          .addFields(
-            { name: 'Reason', value: reason },
-            { name: 'Total Warnings', value: `${userWarns}`, inline: true },
-            { name: 'Moderator', value: message.author.tag, inline: true }
-          );
-        return message.reply({ embeds: [embed] });
-      }
-
-      // --- !ban (Tempban) ---
-      if (command === 'ban') {
-        if (!message.member.permissions.has(PermissionFlagsBits.BanMembers)) {
-          return message.reply('❌ You need the **Ban Members** permission to ban users.');
-        }
-        const targetUser = message.mentions.users.first();
-        if (!targetUser) return message.reply('❌ Mention a user to ban. Usage: `!ban @user [1h/1d] [reason]`');
-        if (targetUser.id === message.author.id) return message.reply('❌ You cannot ban yourself, idiot.');
-        if (targetUser.id === message.client.user.id) return message.reply('❌ You cannot ban me!');
-
-        const timeArg = args[1];
-        const timeMatch = timeArg ? timeArg.match(/^(\d+)([smhd])$/i) : null;
-        
-        let durationMs = 0;
-        let durationStr = 'Permanent';
-        
-        if (timeMatch) {
-          const value = parseInt(timeMatch[1], 10);
-          const unit = timeMatch[2].toLowerCase();
-          if (unit === 's') durationMs = value * 1000;
-          if (unit === 'm') durationMs = value * 60 * 1000;
-          if (unit === 'h') durationMs = value * 60 * 60 * 1000;
-          if (unit === 'd') durationMs = value * 24 * 60 * 60 * 1000;
-          durationStr = timeArg;
-        }
-
-        const reason = args.slice(timeMatch ? 2 : 1).join(' ') || 'No reason provided';
-
-        try {
-          await targetUser.send(`🔨 You have been **banned** from **${message.guild.name}**.\n**Duration:** ${durationStr}\n**Reason:** ${reason}`).catch(() => {});
-          
-          await message.guild.members.ban(targetUser, { reason: `${reason} (Banned by ${message.author.tag})` });
-          
-          const embed = new EmbedBuilder()
-            .setColor(0xff0000)
-            .setTitle('🔨 User Banned')
-            .setDescription(`${targetUser.tag} has been banned.`)
-            .addFields(
-              { name: 'Duration', value: durationStr, inline: true },
-              { name: 'Reason', value: reason, inline: true }
-            );
-          await message.reply({ embeds: [embed] });
-
-          if (durationMs > 0) {
-            setTimeout(async () => {
-              try {
-                await message.guild.members.unban(targetUser.id, 'Temporary ban expired');
-                message.channel.send(`✅ **${targetUser.tag}** has been automatically unbanned.`);
-              } catch (e) { console.error('Auto-unban failed:', e.message); }
-            }, durationMs);
-          }
-
-        } catch (error) {
-          return message.reply('❌ I could not ban this user. Make sure my role is higher than theirs.');
-        }
-        return;
-      }
-
-      // --- !game (GBA Emulator) ---
-      if (command === 'game' || command === 'playgame') {
+      // --- !playlist ---
+      if (command === 'playlist') {
+        const query = args.join(' ');
+        if (!query) return message.reply('❌ Provide a playlist name. Usage: `!playlist lofi beats`');
+        directPlaylistQuery = query; // Pass this to the main logic below
+      } 
+      else if (command === 'game' || command === 'playgame') {
+        // --- !game (GBA Emulator) ---
         const gameKey = args[0];
         
-        // Show List of Games with Images
         if (!gameKey) {
           const games = await getGameList();
           if (!games || games.length === 0) return message.reply("❌ No games available.");
 
-          // Create an embed for each game showing its image
           const embeds = games.slice(0, 10).map(g => {
             return new EmbedBuilder()
               .setColor(0x8E33FF)
@@ -407,22 +290,16 @@ module.exports = {
               .setDescription(`Type \`!game ${g.key}\` to play this game!`);
           });
           
-          return message.reply({ 
-            content: '🎮 **Available Games**', 
-            embeds: embeds 
-          });
+          return message.reply({ content: '🎮 **Available Games**', embeds: embeds });
         }
 
-        // Show specific game launch buttons
         const urls = getGameUrls(gameKey);
-        if (!urls) {
-          return message.reply(`❌ Game \`${gameKey}\` not found. Type \`!game\` to see the list.`);
-        }
+        if (!urls) return message.reply(`❌ Game \`${gameKey}\` not found. Type \`!game\` to see the list.`);
 
         const embed = new EmbedBuilder()
           .setColor(0x00ffcc)
           .setTitle(`🎮 ${urls.name}`)
-          .setThumbnail(urls.thumbnail || null) // Shows the game cover art!
+          .setThumbnail(urls.thumbnail || null)
           .setDescription('Click the buttons below to launch the emulator in your browser!')
           .setFooter({ text: 'Note: Multiplayer requires a public netplay server.' });
 
@@ -432,6 +309,129 @@ module.exports = {
         );
 
         return message.reply({ embeds: [embed], components: [row] });
+      }
+      else if (command === 'web' && args[0] === 'game') {
+        // --- !web game (Dropdown Menu) ---
+        const options = getWebGameList();
+        if (!options || options.length === 0) return message.reply("❌ No web games available.");
+
+        const select = new StringSelectMenuBuilder()
+          .setCustomId('webgame_select')
+          .setPlaceholder('🕹️ Select a web game to play...')
+          .addOptions(options);
+
+        const row = new ActionRowBuilder().addComponents(select);
+
+        const embed = new EmbedBuilder()
+          .setColor(0x8E33FF)
+          .setTitle('🌐 Web Games')
+          .setDescription('Pick a game from the dropdown below to view its details and play!')
+          .setFooter({ text: 'Games open in your web browser.' });
+
+        const replyMsg = await message.reply({ embeds: [embed], components: [row] });
+
+        const collector = replyMsg.createMessageComponentCollector({ filter: (i) => i.customId === 'webgame_select' });
+        collector.on('collect', async (i) => {
+          if (i.user.id !== message.author.id) return i.reply({ content: "❌ This menu isn't for you, baka!", ephemeral: true });
+          await i.deferUpdate();
+          
+          const game = getWebGame(i.values[0]);
+          if (!game) return i.editReply({ content: '❌ Game not found.' });
+
+          const gameEmbed = new EmbedBuilder()
+            .setColor(0x00ffcc)
+            .setTitle(`🕹️ ${game.name}`)
+            .setDescription(`${game.description}\n\nClick the button below to launch the game!`)
+            .setImage(game.thumbnail || null)
+            .setFooter({ text: 'Have fun!' });
+
+          // Discord limits URLs to 512 chars. 
+          let playUrl = `https://molfoid-bot-j2b2.vercel.app/game.html?src=${encodeURIComponent(game.url)}`;
+          
+          // If it's too long, fallback to the direct URL so it doesn't crash
+          if (playUrl.length > 512) {
+              playUrl = game.url;
+          }
+
+          const playRow = new ActionRowBuilder().addComponents(
+            new ButtonBuilder()
+              .setLabel('🚀 Play Now')
+              .setStyle(ButtonStyle.Link)
+              .setURL(playUrl)
+          );
+
+          await i.editReply({ embeds: [gameEmbed], components: [playRow] });
+        });
+        return;
+      }
+
+      // Server-only moderation commands
+      if (message.guild) {
+        if (command === 'purge' || command === 'clear') return purgeMessages(message, args);
+        
+        if (command === 'github' || command === 'gh') {
+          const repoUrl = args[0];
+          if (!repoUrl || !repoUrl.includes('github.com')) return message.reply('❌ Provide a valid GitHub URL (e.g., `!github https://github.com/discordjs/discord.js`)');
+          const match = repoUrl.match(/github\.com\/([^/]+)\/([^/]+)/);
+          if (!match) return message.reply('❌ Invalid GitHub URL format.');
+          const [, owner, repo] = match;
+          const cleanRepo = repo.replace(/\.git$/, '');
+          try {
+            const res = await axios.get(`https://api.github.com/repos/${owner}/${cleanRepo}/releases/latest`);
+            const release = res.data;
+            const embed = new EmbedBuilder()
+              .setColor(0x24292e).setTitle(`📦 Latest Release: ${release.name || release.tag_name}`)
+              .setURL(release.html_url).setAuthor({ name: `${owner}/${cleanRepo}`, iconURL: 'https://github.githubassets.com/favicons/favicon.png' })
+              .setDescription(release.body ? release.body.substring(0, 500) + '...' : 'No release notes provided.')
+              .setFooter({ text: `Published on ${new Date(release.published_at).toDateString()}` });
+            return message.reply({ embeds: [embed] });
+          } catch (error) { return message.reply(`❌ Could not fetch releases for \`${owner}/${cleanRepo}\`.`); }
+        }
+
+        if (command === 'warn') {
+          if (!message.member.permissions.has(PermissionFlagsBits.ModerateMembers)) return message.reply('❌ You need the **Moderate Members** permission to warn users.');
+          const targetUser = message.mentions.users.first();
+          if (!targetUser) return message.reply('❌ Mention a user to warn. Usage: `!warn @user [reason]`');
+          const reason = args.slice(1).join(' ') || 'No reason provided';
+          if (!warnings.has(targetUser.id)) warnings.set(targetUser.id, []);
+          warnings.get(targetUser.id).push(reason);
+          const userWarns = warnings.get(targetUser.id).length;
+          try { await targetUser.send(`⚠️ You have been warned in **${message.guild.name}** by ${message.author.tag}.\n**Reason:** ${reason}\n**Total Warnings:** ${userWarns}`); } catch { }
+          const embed = new EmbedBuilder().setColor(0xff9900).setTitle('⚠️ User Warned').setDescription(`${targetUser.tag} has been warned.`)
+            .addFields({ name: 'Reason', value: reason }, { name: 'Total Warnings', value: `${userWarns}`, inline: true }, { name: 'Moderator', value: message.author.tag, inline: true });
+          return message.reply({ embeds: [embed] });
+        }
+
+        if (command === 'ban') {
+          if (!message.member.permissions.has(PermissionFlagsBits.BanMembers)) return message.reply('❌ You need the **Ban Members** permission to ban users.');
+          const targetUser = message.mentions.users.first();
+          if (!targetUser) return message.reply('❌ Mention a user to ban. Usage: `!ban @user [1h/1d] [reason]`');
+          if (targetUser.id === message.author.id) return message.reply('❌ You cannot ban yourself, idiot.');
+          if (targetUser.id === message.client.user.id) return message.reply('❌ You cannot ban me!');
+          const timeArg = args[1];
+          const timeMatch = timeArg ? timeArg.match(/^(\d+)([smhd])$/i) : null;
+          let durationMs = 0, durationStr = 'Permanent';
+          if (timeMatch) {
+            const value = parseInt(timeMatch[1], 10), unit = timeMatch[2].toLowerCase();
+            if (unit === 's') durationMs = value * 1000; if (unit === 'm') durationMs = value * 60 * 1000;
+            if (unit === 'h') durationMs = value * 60 * 60 * 1000; if (unit === 'd') durationMs = value * 24 * 60 * 60 * 1000;
+            durationStr = timeArg;
+          }
+          const reason = args.slice(timeMatch ? 2 : 1).join(' ') || 'No reason provided';
+          try {
+            await targetUser.send(`🔨 You have been **banned** from **${message.guild.name}**.\n**Duration:** ${durationStr}\n**Reason:** ${reason}`).catch(() => {});
+            await message.guild.members.ban(targetUser, { reason: `${reason} (Banned by ${message.author.tag})` });
+            const embed = new EmbedBuilder().setColor(0xff0000).setTitle('🔨 User Banned').setDescription(`${targetUser.tag} has been banned.`)
+              .addFields({ name: 'Duration', value: durationStr, inline: true }, { name: 'Reason', value: reason, inline: true });
+            await message.reply({ embeds: [embed] });
+            if (durationMs > 0) {
+              setTimeout(async () => {
+                try { await message.guild.members.unban(targetUser.id, 'Temporary ban expired'); message.channel.send(`✅ **${targetUser.tag}** has been automatically unbanned.`); } catch (e) { }
+              }, durationMs);
+            }
+          } catch (error) { return message.reply('❌ I could not ban this user. Make sure my role is higher than theirs.'); }
+          return;
+        }
       }
     }
 
@@ -465,13 +465,11 @@ module.exports = {
             }
           }
         }
-      } catch (e) {
-        console.error('Auto-Scanner Error:', e.message);
-      }
+      } catch (e) { console.error('Auto-Scanner Error:', e.message); }
     });
 
     const isDM = !message.guild;
-    if (!isDM && !message.mentions.has(message.client.user.id)) return;
+    if (!isDM && !message.mentions.has(message.client.user.id) && !directPlaylistQuery) return;
 
     const now = Date.now();
     const last = cooldowns.get(message.author.id) || 0;
@@ -503,7 +501,7 @@ module.exports = {
       // NATURAL LANGUAGE: PURGE
       // ==========================================
       if (/^(delete|purge|clear)\s+(msg|messages?)\b/i.test(prompt)) {
-        return await purgeMessages(message, prompt);
+        if (!isDM) return await purgeMessages(message, prompt);
       }
 
       // ==========================================
@@ -521,7 +519,7 @@ module.exports = {
       }
 
       // ==========================================
-      // 1. WALLPAPER (Image Display)
+      // 1. WALLPAPER
       // ==========================================
       if (/^(wallpaper|wp)\s+(.+)$/i.test(prompt)) {
         const query = prompt.replace(/^(wallpaper|wp)\s+/i, '').trim();
@@ -540,15 +538,9 @@ module.exports = {
           const pageResults = allResults.slice(start, start + itemsPerPage);
 
           const embeds = pageResults.map((wp, index) => {
-            const embed = new EmbedBuilder()
-              .setColor(0x5865f2)
-              .setTitle(`🖼️ ${wp.title}`)
-              .setURL(wp.pageUrl)
-              .setImage(wp.imageUrl) 
-              .setFooter({ 
-               text: `Resolution: ${wp.resolution || 'Unknown'} | Uploader: ${wp.uploader || 'Unknown'} | Image ${start + index + 1} of ${allResults.length}`
-              });
-            return embed;
+            return new EmbedBuilder()
+              .setColor(0x5865f2).setTitle(`🖼️ ${wp.title}`).setURL(wp.pageUrl).setImage(wp.imageUrl) 
+              .setFooter({ text: `Resolution: ${wp.resolution || 'Unknown'} | Uploader: ${wp.uploader || 'Unknown'} | Image ${start + index + 1} of ${allResults.length}` });
           });
 
           const components = [];
@@ -559,23 +551,18 @@ module.exports = {
             ));
           }
 
-          return {
-            content: `*sends a smug sticker* Tch... here are some "${query}" wallpapers. (Page ${page + 1}/${totalPages})`,
-            embeds: embeds,
-            components: components
-          };
+          return { content: `*sends a smug sticker* Tch... here are some "${query}" wallpapers. (Page ${page + 1}/${totalPages})`, embeds: embeds, components: components };
         };
 
         const replyMsg = await message.reply(generateWallpaperPayload(currentPage));
 
         if (totalPages > 1) {
-          const collector = replyMsg.createMessageComponentCollector({ time: 5 * 60 * 1000 });
+          const collector = replyMsg.createMessageComponentCollector();
           collector.on('collect', async (i) => {
             if (i.user.id !== message.author.id) return i.reply({ content: "❌ This menu isn't for you, baka!", ephemeral: true });
             if (i.customId === 'wp_prev') { currentPage--; await i.update(generateWallpaperPayload(currentPage)); }
             else if (i.customId === 'wp_next') { currentPage++; await i.update(generateWallpaperPayload(currentPage)); }
           });
-          collector.on('end', () => replyMsg.edit({ components: [] }).catch(() => {}));
         }
         return;
       }
@@ -597,10 +584,8 @@ module.exports = {
           const pageResults = allResults.slice(start, start + itemsPerPage);
           const embeds = pageResults.map(item => {
             const typeEmoji = item.type === 'tvSeries' ? '📺' : item.type === 'movie' ? '🎬' : '🎞️';
-            const embed = new EmbedBuilder()
-              .setColor(0xf5c518).setTitle(`${typeEmoji} ${item.title} (${item.year})`)
-              .setURL(`https://www.imdb.com/title/${item.id}/`)
-              .setFooter({ text: `Type: ${item.type} | Click title for IMDb page` });
+            const embed = new EmbedBuilder().setColor(0xf5c518).setTitle(`${typeEmoji} ${item.title} (${item.year})`)
+              .setURL(`https://www.imdb.com/title/${item.id}/`).setFooter({ text: `Type: ${item.type} | Click title for IMDb page` });
             if (item.image) embed.setThumbnail(item.image);
             return embed;
           });
@@ -611,20 +596,16 @@ module.exports = {
               new ButtonBuilder().setCustomId('imdb_next').setLabel('Next ▶️').setStyle(ButtonStyle.Secondary).setDisabled(page === totalPages - 1)
             ));
           }
-          return {
-            content: `*sends a smug sticker* Hmph. Here are the IMDb results for "${query}". (Page ${page + 1}/${totalPages})`,
-            embeds, components,
-          };
+          return { content: `*sends a smug sticker* Hmph. Here are the IMDb results for "${query}". (Page ${page + 1}/${totalPages})`, embeds, components };
         };
         const replyMsg = await message.reply(gen(currentPage));
         if (totalPages > 1) {
-          const collector = replyMsg.createMessageComponentCollector({ time: 5 * 60 * 1000 });
+          const collector = replyMsg.createMessageComponentCollector();
           collector.on('collect', async (i) => {
             if (i.user.id !== message.author.id) return i.reply({ content: "❌ This menu isn't for you, baka!", ephemeral: true });
             if (i.customId === 'imdb_prev') { currentPage--; await i.update(gen(currentPage)); }
             else if (i.customId === 'imdb_next') { currentPage++; await i.update(gen(currentPage)); }
           });
-          collector.on('end', () => replyMsg.edit({ components: [] }).catch(() => {}));
         }
         return;
       }
@@ -632,9 +613,9 @@ module.exports = {
       // ==========================================
       // 3. PLAYLIST
       // ==========================================
-      const isPlaylistRequest = prompt.toLowerCase().includes('playlist') && !prompt.toLowerCase().includes('auto');
+      const isPlaylistRequest = directPlaylistQuery || (prompt.toLowerCase().includes('playlist') && !prompt.toLowerCase().includes('auto'));
       if (isPlaylistRequest) {
-        let query = prompt.replace(/\b(playlist|mix|make|a|of|the|music|songs?)\b/gi, '').replace(/\s+/g, ' ').trim();
+        let query = directPlaylistQuery ? directPlaylistQuery : prompt.replace(/\b(playlist|mix|make|a|of|the|music|songs?)\b/gi, '').replace(/\s+/g, ' ').trim();
         if (!query) query = prompt;
         const playlistData = await getPlaylist(query);
         if (!playlistData) {
@@ -646,24 +627,14 @@ module.exports = {
         const gen = (page) => {
           const start = page * itemsPerPage;
           const pageVideos = playlistData.videos.slice(start, start + itemsPerPage);
-          const songList = pageVideos.map((v, i) =>
-            `**${start + i + 1}.** [${v.title.substring(0, 50)}...](${v.url}) \`${v.duration}\``
-          ).join('\n');
-          const embed = new EmbedBuilder()
-            .setColor(0x00ff00)
-            .setTitle(`🎶 ${message.author.username}'s Playlist: ${playlistData.title}`)
-            .setDescription(songList || 'No songs found.')
-            .setFooter({ text: `Page ${page + 1} of ${totalPages} | Total Songs: ${playlistData.videos.length}` });
+          const songList = pageVideos.map((v, i) => `**${start + i + 1}.** [${v.title.substring(0, 50)}...](${v.url}) \`${v.duration}\``).join('\n');
+          const embed = new EmbedBuilder().setColor(0x00ff00).setTitle(`🎶 ${message.author.username}'s Playlist: ${playlistData.title}`)
+            .setDescription(songList || 'No songs found.').setFooter({ text: `Page ${page + 1} of ${totalPages} | Total Songs: ${playlistData.videos.length}` });
           const options = pageVideos.map((v, index) => ({
-            label: v.title.substring(0, 100),
-            value: String(start + index),
-            description: `${v.author} • ${v.duration}`.substring(0, 100),
-            emoji: '🎵'
+            label: v.title.substring(0, 100), value: String(start + index),
+            description: `${v.author} • ${v.duration}`.substring(0, 100), emoji: '🎵'
           }));
-          const select = new StringSelectMenuBuilder()
-            .setCustomId('playlist_pick')
-            .setPlaceholder('🎧 Pick a song to play')
-            .addOptions(options);
+          const select = new StringSelectMenuBuilder().setCustomId('playlist_pick').setPlaceholder('🎧 Pick a song to play').addOptions(options);
           const components = [new ActionRowBuilder().addComponents(select)];
           if (totalPages > 1) {
             components.push(new ActionRowBuilder().addComponents(
@@ -674,25 +645,19 @@ module.exports = {
           return { embeds: [embed], components };
         };
         const replyMsg = await message.reply(gen(currentPage));
-        const collector = replyMsg.createMessageComponentCollector({ time: 5 * 60 * 1000 });
+        const collector = replyMsg.createMessageComponentCollector();
         collector.on('collect', async (i) => {
-          if (i.user.id !== message.author.id) {
-            return i.reply({ content: "❌ This playlist isn't for you, baka!", ephemeral: true });
-          }
+          if (i.user.id !== message.author.id) return i.reply({ content: "❌ This playlist isn't for you, baka!", ephemeral: true });
           if (i.customId === 'playlist_prev') { currentPage--; await i.update(gen(currentPage)); }
           else if (i.customId === 'playlist_next') { currentPage++; await i.update(gen(currentPage)); }
           else if (i.customId === 'playlist_pick') {
             await i.deferUpdate();
             const picked = playlistData.videos[Number(i.values[0])];
             const song = await fetchSongByUrl(picked.url);
-            if (song) {
-              await sendMusicReply(i, 'editReply', song, '▶️ **Now Playing:**');
-            } else {
-              await i.editReply({ content: '*sends a broken sticker* Failed to get the link.' });
-            }
+            if (song) await sendMusicReply(i, 'editReply', song, '▶️ **Now Playing:**');
+            else await i.editReply({ content: '*sends a broken sticker* Failed to get the link.' });
           }
         });
-        collector.on('end', () => replyMsg.edit({ components: [] }).catch(() => {}));
         return;
       }
 
@@ -702,9 +667,8 @@ module.exports = {
       if (/^(search|find)\s+(.+?)\s+yt$/i.test(prompt)) {
         const query = prompt.replace(/^(search|find)\s+/i, '').replace(/\s+yt$/i, '').trim();
         const results = await searchYouTube(query);
-        if (results.length === 0) {
-          return message.reply(`*sends a pouting sticker* Tch... I couldn't find any YouTube video for "${query}", baka.`);
-        }
+        if (results.length === 0) return message.reply(`*sends a pouting sticker* Tch... I couldn't find any YouTube video for "${query}", baka.`);
+        
         let currentPage = 0;
         const itemsPerPage = 5;
         const totalPages = Math.ceil(results.length / itemsPerPage);
@@ -713,24 +677,15 @@ module.exports = {
           const pageResults = results.slice(start, start + itemsPerPage);
           const searchEmbeds = pageResults.map((v, i) => {
             const globalIndex = start + i + 1;
-            return new EmbedBuilder()
-              .setColor(0xff0000).setTitle(`${globalIndex}. ${v.title.substring(0, 80)}`)
+            return new EmbedBuilder().setColor(0xff0000).setTitle(`${globalIndex}. ${v.title.substring(0, 80)}`)
               .setURL(v.url).setThumbnail(v.thumbnail)
-              .addFields(
-                { name: 'Channel', value: v.author.substring(0, 30), inline: true },
-                { name: 'Duration', value: v.duration, inline: true }
-              );
+              .addFields({ name: 'Channel', value: v.author.substring(0, 30), inline: true }, { name: 'Duration', value: v.duration, inline: true });
           });
           const options = pageResults.map((v, index) => ({
-            label: v.title.substring(0, 100),
-            value: String(start + index),
-            description: `${v.author} • ${v.duration}`.substring(0, 100),
-            emoji: '🎧'
+            label: v.title.substring(0, 100), value: String(start + index),
+            description: `${v.author} • ${v.duration}`.substring(0, 100), emoji: '🎧'
           }));
-          const select = new StringSelectMenuBuilder()
-            .setCustomId('yt_search_pick')
-            .setPlaceholder(`📋 ${results.length} results — pick one`)
-            .addOptions(options);
+          const select = new StringSelectMenuBuilder().setCustomId('yt_search_pick').setPlaceholder(`📋 ${results.length} results — pick one`).addOptions(options);
           const components = [new ActionRowBuilder().addComponents(select)];
           if (totalPages > 1) {
             components.push(new ActionRowBuilder().addComponents(
@@ -738,13 +693,10 @@ module.exports = {
               new ButtonBuilder().setCustomId('yt_next').setLabel('Next ▶️').setStyle(ButtonStyle.Secondary).setDisabled(page === totalPages - 1)
             ));
           }
-          return {
-            content: `*sends an annoyed sticker* Tch... Page ${page + 1}/${totalPages} for "${query}". Pick one, moron.`,
-            embeds: searchEmbeds, components,
-          };
+          return { content: `*sends an annoyed sticker* Tch... Page ${page + 1}/${totalPages} for "${query}". Pick one, moron.`, embeds: searchEmbeds, components };
         };
         const replyMsg = await message.reply(gen(currentPage));
-        const collector = replyMsg.createMessageComponentCollector({ time: 5 * 60 * 1000 });
+        const collector = replyMsg.createMessageComponentCollector();
         collector.on('collect', async (i) => {
           if (i.user.id !== message.author.id) return i.reply({ content: "❌ This menu isn't for you, baka!", ephemeral: true });
           if (i.customId === 'yt_prev') { currentPage--; await i.update(gen(currentPage)); }
@@ -753,14 +705,10 @@ module.exports = {
             await i.deferUpdate();
             const picked = results[Number(i.values[0])];
             const song = await fetchSongByUrl(picked.url);
-            if (song) {
-              await sendMusicReply(i, 'editReply', song, '▶️ **High Quality Stream:**');
-            } else {
-              await i.editReply({ content: '*sends a broken sticker* Failed to get the link.' });
-            }
+            if (song) await sendMusicReply(i, 'editReply', song, '▶️ **High Quality Stream:**');
+            else await i.editReply({ content: '*sends a broken sticker* Failed to get the link.' });
           }
         });
-        collector.on('end', () => replyMsg.edit({ components: [] }).catch(() => {}));
         return;
       }
 
@@ -768,36 +716,24 @@ module.exports = {
       // 5. YOUTUBE DIRECT
       // ==========================================
       if (/ yt$/i.test(prompt)) {
-        const query = prompt.replace(/ yt$/i, '')
-          .replace(/\b(give|me|play|search|find|download|the|a|song|music|mp3)\b/gi, '')
-          .replace(/\s+/g, ' ').trim() || prompt.replace(/ yt$/i, '').trim();
-
+        const query = prompt.replace(/ yt$/i, '').replace(/\b(give|me|play|search|find|download|the|a|song|music|mp3)\b/gi, '').replace(/\s+/g, ' ').trim() || prompt.replace(/ yt$/i, '').trim();
         const results = await searchYouTube(query);
         if (results.length === 0) return message.reply(`*sends a pouting sticker* Tch... I couldn't find that on YouTube, baka.`);
-
         const song = await fetchSongByUrl(results[0].url);
         if (!song) return message.reply({ content: '*sends a broken sticker* Failed to get the link.' });
-
         return await sendMusicReply(message, 'reply', song, '▶️ **High Quality Stream:**');
       }
 
       // ==========================================
       // 6. MAIN MUSIC SEARCH
       // ==========================================
-      const isMusicRequest =
-        /\b(give|play|search|find|download)\b.*\b(song|music|mp3)\b/i.test(prompt) ||
-        /^play\s+/i.test(prompt) ||
-        prompt.toLowerCase().includes('song');
-
+      const isMusicRequest = /\b(give|play|search|find|download)\b.*\b(song|music|mp3)\b/i.test(prompt) || /^play\s+/i.test(prompt) || prompt.toLowerCase().includes('song');
       if (isMusicRequest) {
         let query = prompt.replace(/\b(give|me|play|search|find|download|the|a|song|music|mp3)\b/gi, '').replace(/\s+/g, ' ').trim();
         if (!query) query = prompt;
 
         const list = await searchMusicList(query);
-        if (!list || list.length === 0) {
-          return message.reply(`*sends a pouting sticker* Tch... I couldn't find any song called "${query}", baka.`);
-        }
-
+        if (!list || list.length === 0) return message.reply(`*sends a pouting sticker* Tch... I couldn't find any song called "${query}", baka.`);
         const first = await fetchSongByUrl(list[0].videoId);
         if (!first) return message.reply("*sends a broken sticker* YouTube gave me garbage data. Try again later.");
 
@@ -805,20 +741,14 @@ module.exports = {
         const replyMsg = await sendMusicReply(message, 'reply', first, molfoidText, buildMusicRows(list));
 
         if (list.length > 1) {
-          const collector = replyMsg.createMessageComponentCollector({
-            filter: (i) => i.customId === 'music_pick_msg',
-            time: 5 * 60 * 1000,
-          });
+          const collector = replyMsg.createMessageComponentCollector({ filter: (i) => i.customId === 'music_pick_msg' });
           collector.on('collect', async (i) => {
             if (i.user.id !== message.author.id) return i.reply({ content: "❌ This menu isn't for you, baka!", ephemeral: true });
             await i.deferUpdate();
             const picked = list[Number(i.values[0])];
             const song = await fetchSongByUrl(picked.videoId);
-            if (song) {
-              await sendMusicReply(i, 'editReply', song, molfoidText, buildMusicRows(list));
-            }
+            if (song) await sendMusicReply(i, 'editReply', song, molfoidText, buildMusicRows(list));
           });
-          collector.on('end', () => replyMsg.edit({ components: [] }).catch(() => {}));
         }
         return;
       }
@@ -846,6 +776,7 @@ module.exports = {
       }
       let gifUrl = null;
       if (gifQuery) gifUrl = await searchGif(gifQuery);
+      
       let stickerId = null;
       const stickerMatch = aiResponse.match(/\*sends an? ([a-z-]+) sticker\*/i);
       if (stickerMatch) {
@@ -862,8 +793,7 @@ module.exports = {
       const firstPayload = {};
       if (chunks[0] && chunks[0].trim() !== '') firstPayload.content = chunks[0];
       if (gifUrl) {
-        const embed = new EmbedBuilder().setColor(0xff0000).setImage(gifUrl)
-          .setFooter({ text: `Requested by ${message.author.username}` });
+        const embed = new EmbedBuilder().setColor(0xff0000).setImage(gifUrl).setFooter({ text: `Requested by ${message.author.username}` });
         if (!firstPayload.content) firstPayload.content = '*sends an angry sticker* Here is your stupid GIF.';
         firstPayload.embeds = [embed];
       }
