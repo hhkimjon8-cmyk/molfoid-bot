@@ -3,6 +3,16 @@ const axios = require('axios');
 
 module.exports = async (req, res) => {
     try {
+        // 1. Check if the game SDK is requesting the missing logo
+        if (req.url.includes('/gameSDK/logo/OTHER/144x144.png')) {
+            // Return a transparent 1x1 pixel image
+            const transparentPixel = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=', 'base64');
+            res.setHeader('Content-Type', 'image/png');
+            res.setHeader('Cache-Control', 'public, max-age=31536000');
+            return res.status(200).send(transparentPixel);
+        }
+
+        // 2. Otherwise, fetch the game HTML
         const targetUrl = 'https://www.h5games4u.com/games/Brainrot-Escape-Diamond-Quest/index.html?cid=yyg';
         
         const response = await axios.get(targetUrl, {
@@ -16,23 +26,19 @@ module.exports = async (req, res) => {
 
         let html = response.data;
 
-        // 1. Inject <base> tag so game assets load correctly
+        // 3. Inject <base> tag so game assets load correctly
         if (html.includes('<head>')) {
             html = html.replace('<head>', '<head><base href="https://www.h5games4u.com/games/Brainrot-Escape-Diamond-Quest/">');
         }
 
-        // 2. Strip Meta CSP tags
+        // 4. Strip Meta CSP tags
         html = html.replace(/<meta[^>]*http-equiv="Content-Security-Policy"[^>]*>/gi, '');
 
-        // 🚨 3. THE FIX: Remove the anti-iframe script 🚨
-        // This regex finds the script block containing the specific error message and deletes it.
-        // It looks for <script> ... "The way this game is embedded is incorrect" ... </script>
+        // 5. Remove the anti-iframe script (the popup error)
         const iframeCheckRegex = /<script\b[^>]*>[\s\S]*?The way this game is embedded is incorrect[\s\S]*?<\/script>/gi;
-        
-        // We replace it with an empty string to delete the check completely
         html = html.replace(iframeCheckRegex, '');
 
-        // Send the modified HTML back
+        // 6. Send the modified HTML back
         res.setHeader('Content-Type', 'text/html');
         res.setHeader('Access-Control-Allow-Origin', '*');
         res.removeHeader('X-Frame-Options');
