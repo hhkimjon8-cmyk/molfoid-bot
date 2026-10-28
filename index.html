@@ -16,25 +16,37 @@
     </video>
     <div id="status">Waiting for video URL...</div>
 
-    <!-- You must include the Discord Embedded App SDK -->
+    <!-- Discord Embedded App SDK -->
     <script src="https://cdn.jsdelivr.net/npm/@discord/embedded-app-sdk@1.0.0/dist/embedded-app-sdk.js"></script>
     <script>
-        // Initialize the Discord SDK (required for the Activity to load)
-        const discordSdk = new window.DiscordSDK('YOUR_APP_ID'); // Replace with your App ID
         async function setup() {
-            await discordSdk.ready();
-            // The Activity URL will have the video link appended as a query parameter
+            // Try to initialize the Discord SDK (will fail silently if opened outside Discord)
+            try {
+                // REPLACE 'YOUR_APP_ID' WITH YOUR ACTUAL DISCORD APPLICATION ID
+                const discordSdk = new window.DiscordSDK('YOUR_APP_ID'); 
+                await discordSdk.ready();
+                console.log("Discord SDK ready");
+            } catch (e) {
+                console.log("Not running inside Discord Activity, or App ID is missing.");
+            }
+
+            // Parse the URL (your bot sends 'url', but we check 'videoUrl' just in case)
             const urlParams = new URLSearchParams(window.location.search);
-            const videoUrl = urlParams.get('videoUrl');
+            const videoUrl = urlParams.get('url') || urlParams.get('videoUrl');
             
             const videoElement = document.getElementById('player');
             const sourceElement = document.getElementById('videoSource');
             const statusElement = document.getElementById('status');
 
             if (videoUrl) {
-                sourceElement.src = videoUrl;
+                let cleanUrl = videoUrl;
+                if (cleanUrl.startsWith('https//')) cleanUrl = cleanUrl.replace('https//', 'https://');
+                if (!cleanUrl.startsWith('http')) cleanUrl = 'https://' + cleanUrl;
+
+                sourceElement.src = cleanUrl;
                 videoElement.load();
                 statusElement.innerText = "Playing...";
+                
                 // Attempt to auto-play
                 videoElement.play().catch(e => {
                     statusElement.innerText = "Click play to start.";
