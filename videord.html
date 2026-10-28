@@ -5,26 +5,35 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Stremio Stream Player</title>
     <style>
-        body { background: #0b0e14; color: #fff; font-family: sans-serif; margin: 0; padding: 20px; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; }
+        body { background: #0b0e14; color: #fff; font-family: system-ui, -apple-system, sans-serif; margin: 0; padding: 20px; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; }
         .container { max-width: 800px; width: 100%; text-align: center; }
-        video { width: 100%; max-height: 60vh; background: #000; border-radius: 12px; margin-bottom: 20px; box-shadow: 0 4px 15px rgba(0,0,0,0.5); }
+        video { width: 100%; max-height: 50vh; background: #000; border-radius: 12px; margin-bottom: 20px; box-shadow: 0 4px 15px rgba(0,0,0,0.5); display: none; }
         h1 { font-size: 20px; margin-bottom: 10px; color: #00ffcc; }
         p { color: #a6b0c5; font-size: 14px; margin-bottom: 20px; }
         .btn-group { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; }
-        .btn { padding: 12px 20px; border-radius: 8px; font-weight: bold; text-decoration: none; cursor: pointer; border: none; font-size: 14px; transition: 0.2s; }
+        .btn { padding: 12px 20px; border-radius: 8px; font-weight: bold; text-decoration: none; cursor: pointer; border: none; font-size: 14px; transition: 0.2s; display: inline-block; }
         .btn-primary { background: #00ffcc; color: #000; }
         .btn-secondary { background: #27334a; color: #fff; border: 1px solid #394358; }
         .btn:hover { filter: brightness(1.2); transform: translateY(-2px); }
-        .toast { position: fixed; top: 20px; background: #222; padding: 10px 20px; border-radius: 8px; opacity: 0; transition: opacity 0.3s; font-size: 14px; }
+        .toast { position: fixed; top: 20px; background: #222; padding: 10px 20px; border-radius: 8px; opacity: 0; transition: opacity 0.3s; font-size: 14px; z-index: 9999; pointer-events: none; }
+        
+        .input-group { display: none; gap: 10px; margin-bottom: 20px; width: 100%; max-width: 600px; margin: 0 auto 20px auto; }
+        .input-group input { flex: 1; padding: 12px; border-radius: 8px; border: 1px solid #394358; background: #1a2235; color: #fff; outline: none; font-size: 14px; }
+        .input-group button { padding: 12px 20px; border-radius: 8px; border: none; background: #00ffcc; color: #000; font-weight: bold; cursor: pointer; }
     </style>
 </head>
 <body>
 
     <div class="container">
         <h1>📺 Stream Ready</h1>
-        <p>If the video doesn't start automatically, select an external player below.</p>
+        <p id="statusText">Loading...</p>
         
-        <video id="player" controls autoplay playsinline>
+        <div class="input-group" id="manualInput">
+            <input type="text" id="urlInput" placeholder="Paste direct video URL here...">
+            <button onclick="loadManualUrl()">Play</button>
+        </div>
+
+        <video id="player" controls autoplay playsinline crossorigin="anonymous">
             <source id="videoSource" src="" type="video/mp4">
             Your browser does not support the video tag.
         </video>
@@ -35,71 +44,106 @@
     <div class="toast" id="toast">Opening external player...</div>
 
     <script>
-        const urlParams = new URLSearchParams(window.location.search);
-        let mediaUrl = urlParams.get('url');
-
-        if (!mediaUrl) {
-            document.body.innerHTML = '<h1>❌ No video URL provided.</h1>';
-            throw new Error('No URL');
+        let mediaUrl = null;
+        try {
+            const urlParams = new URLSearchParams(window.location.search);
+            mediaUrl = urlParams.get('url');
+            if (!mediaUrl && window.location.hash) {
+                const hashParams = new URLSearchParams(window.location.hash.substring(1));
+                mediaUrl = hashParams.get('url');
+            }
+        } catch (e) {
+            console.error("Failed to parse URL params", e);
         }
 
-        // 🚨 FIX: Ensure the URL has the correct https:// scheme
-        if (mediaUrl.startsWith('https//')) {
-            mediaUrl = mediaUrl.replace('https//', 'https://');
-        } else if (!mediaUrl.startsWith('http')) {
-            mediaUrl = 'https://' + mediaUrl;
+        if (mediaUrl) {
+            try { mediaUrl = decodeURIComponent(mediaUrl); } catch(e){}
+            if (mediaUrl.startsWith('https//')) mediaUrl = mediaUrl.replace('https//', 'https://');
+            if (!mediaUrl.startsWith('http')) mediaUrl = 'https://' + mediaUrl;
         }
 
         const videoElement = document.getElementById('player');
         const sourceElement = document.getElementById('videoSource');
-        sourceElement.src = mediaUrl;
-        videoElement.load();
-
-        const userAgent = navigator.userAgent || navigator.vendor || window.opera;
-        const isAndroid = /android/i.test(userAgent);
-        const isIOS = /iPad|iPhone|iPod/.test(userAgent) && !window.MSStream;
-        const isDesktop = !isAndroid && !isIOS;
-
         const btnGroup = document.getElementById('externalPlayers');
+        const statusText = document.getElementById('statusText');
+        const manualInputDiv = document.getElementById('manualInput');
 
-        function addButton(label, href, isPrimary = false) {
-            const a = document.createElement('a');
-            a.className = `btn ${isPrimary ? 'btn-primary' : 'btn-secondary'}`;
-            a.innerText = label;
-            a.href = href;
-            a.target = "_blank";
-            btnGroup.appendChild(a);
-        }
-
-        const encodedUrl = encodeURIComponent(mediaUrl);
-
-        if (isAndroid) {
-            // 🚨 FIX: Proper Android Intent format
-            addButton('▶️ Play in VLC', `intent://${mediaUrl.replace('https://', '')}#Intent;package=org.videolan.vlc;type=video;scheme=https;end`, true);
-            addButton('▶️ Play in MX Player', `intent://${mediaUrl.replace('https://', '')}#Intent;package=com.mxtech.videoplayer.ad;type=video;scheme=https;end`);
-        } else if (isIOS) {
-            addButton('▶️ Play in VLC', `vlc-x-callback://x-callback-url/stream?url=${encodedUrl}`, true);
-            addButton('▶️ Play in Infuse', `infuse://x-callback-url/play?url=${encodedUrl}`);
+        if (!mediaUrl) {
+            statusText.innerText = "❌ No video URL provided. Please paste the direct link below.";
+            manualInputDiv.style.display = 'flex';
+            btnGroup.style.display = 'none';
         } else {
-            addButton('💻 Play in VLC', `vlc://${mediaUrl}`, true);
+            initPlayer(mediaUrl);
         }
 
-        addButton('🌐 Raw Link (Copy)', mediaUrl);
+        function loadManualUrl() {
+            let url = document.getElementById('urlInput').value.trim();
+            if (url) {
+                if (url.startsWith('https//')) url = url.replace('https//', 'https://');
+                if (!url.startsWith('http')) url = 'https://' + url;
+                mediaUrl = url;
+                manualInputDiv.style.display = 'none';
+                initPlayer(url);
+            }
+        }
 
-        // Auto-Redirect on Mobile
-        if (isAndroid || isIOS) {
-            setTimeout(() => {
-                document.getElementById('toast').style.opacity = '1';
-                
-                if (isAndroid) {
-                    // Remove https:// for the intent scheme
-                    window.location.href = `intent://${mediaUrl.replace('https://', '')}#Intent;package=org.videolan.vlc;type=video;scheme=https;end`;
-                } else if (isIOS) {
-                    window.location.href = `vlc-x-callback://x-callback-url/stream?url=${encodedUrl}`;
-                }
+        function initPlayer(url) {
+            statusText.innerText = "If the video doesn't start automatically, select an external player below.";
+            
+            sourceElement.src = url;
+            videoElement.style.display = 'block';
+            videoElement.load();
+            
+            videoElement.onerror = () => {
+                statusText.innerText = "⚠️ Browser cannot play this format directly. Use an external player below.";
+                videoElement.style.display = 'none';
+            };
 
-                setTimeout(() => { document.getElementById('toast').style.opacity = '0'; }, 3000);
-            }, 1500);
+            const userAgent = navigator.userAgent || navigator.vendor || window.opera;
+            const isAndroid = /android/i.test(userAgent);
+            const isIOS = /iPad|iPhone|iPod/.test(userAgent) && !window.MSStream;
+
+            btnGroup.innerHTML = ''; 
+            btnGroup.style.display = 'flex';
+
+            function addButton(label, href, isPrimary = false) {
+                const a = document.createElement('a');
+                a.className = `btn ${isPrimary ? 'btn-primary' : 'btn-secondary'}`;
+                a.innerText = label;
+                a.href = href;
+                a.target = "_blank";
+                btnGroup.appendChild(a);
+            }
+
+            const encodedUrl = encodeURIComponent(url);
+            const cleanUrl = url.replace(/^https?:\/\//, '');
+
+            if (isAndroid) {
+                addButton('▶️ Play in VLC', `intent://${cleanUrl}#Intent;package=org.videolan.vlc;type=video;scheme=https;end`, true);
+                addButton('▶️ Play in MX Player', `intent://${cleanUrl}#Intent;package=com.mxtech.videoplayer.ad;type=video;scheme=https;end`);
+            } else if (isIOS) {
+                addButton('▶️ Play in VLC', `vlc-x-callback://x-callback-url/stream?url=${encodedUrl}`, true);
+                addButton('▶️ Play in Infuse', `infuse://x-callback-url/play?url=${encodedUrl}`);
+            } else {
+                addButton('💻 Play in VLC', `vlc://${url}`, true);
+            }
+
+            addButton('🌐 Raw Link (Copy)', url);
+
+            // Auto-Redirect on Mobile to VLC after 1.5 seconds to attempt external playing
+            if (isAndroid || isIOS) {
+                setTimeout(() => {
+                    document.getElementById('toast').style.opacity = '1';
+                    
+                    if (isAndroid) {
+                        window.location.href = `intent://${cleanUrl}#Intent;package=org.videolan.vlc;type=video;scheme=https;end`;
+                    } else if (isIOS) {
+                        window.location.href = `vlc-x-callback://x-callback-url/stream?url=${encodedUrl}`;
+                    }
+
+                    setTimeout(() => { document.getElementById('toast').style.opacity = '0'; }, 3000);
+                }, 1500);
+            }
         }
     </script>
 </body>
