@@ -5,75 +5,22 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Brainrot Escape - Play</title>
     <style>
-        body, html {
-            margin: 0;
-            padding: 0;
-            width: 100%;
-            height: 100%;
-            background-color: #000;
-            overflow: hidden;
-        }
-        iframe {
-            width: 100%;
-            height: 100%;
-            border: none;
-            display: block;
-        }
-        #error-message {
-            display: none;
-            color: white;
-            font-family: sans-serif;
-            text-align: center;
-            padding: 20px;
-        }
-        #error-message a {
-            color: #00ffcc;
-            font-size: 20px;
-            text-decoration: none;
-        }
+        body, html { margin: 0; padding: 0; width: 100%; height: 100%; background-color: #000; overflow: hidden; }
+        iframe { width: 100%; height: 100%; border: none; display: block; }
     </style>
 </head>
 <body>
 
     <!-- 
-        The sandbox attribute blocks ads:
-        - allow-scripts: Lets the game's JavaScript run.
-        - allow-same-origin: Lets the game load its own files.
-        - allow-forms & allow-pointer-lock: Needed for gameplay.
-        - We purposely OMIT 'allow-popups' to kill pop-under ads!
+      src points to your Vercel API proxy (/api/proxy). 
+      The sandbox attribute blocks pop-up ads!
     -->
     <iframe 
         id="gameFrame"
-        src="https://www.h5games4u.com/games/Brainrot-Escape-Diamond-Quest/index.html?cid=yyg"
+        src="/api/proxy" 
         sandbox="allow-scripts allow-same-origin allow-forms allow-pointer-lock"
         allowfullscreen>
     </iframe>
 
-    <!-- Fallback if the site blocks the iframe entirely -->
-    <div id="error-message">
-        <h2>⚠️ Game cannot be embedded.</h2>
-        <p>The game server is blocking iframe connections.</p>
-        <a href="https://www.h5games4u.com/games/Brainrot-Escape-Diamond-Quest/index.html?cid=yyg" target="_blank">
-            Click here to play in a new tab
-        </a>
-    </div>
-
-    <script>
-        // This script detects if the iframe was blocked by X-Frame-Options
-        const iframe = document.getElementById('gameFrame');
-        
-        setTimeout(() => {
-            try {
-                // If we can't read the iframe's body, it means it loaded successfully (due to cross-origin rules)
-                if (iframe.contentDocument && iframe.contentDocument.body.innerHTML === "") {
-                    iframe.style.display = 'none';
-                    document.getElementById('error-message').style.display = 'block';
-                }
-            } catch (e) {
-                // Cross-origin error means the game loaded properly
-                console.log("Game loaded successfully.");
-            }
-        }, 3000);
-    </script>
 </body>
 </html>
