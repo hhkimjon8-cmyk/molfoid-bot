@@ -20,6 +20,9 @@ const client = new Client({
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildMessages,
     GatewayIntentBits.MessageContent,
+    
+    // 🔥 CRITICAL: Required for Voice features (Play in Voice)
+    GatewayIntentBits.GuildVoiceStates, 
 
     // DM intents (required for private messages)
     GatewayIntentBits.DirectMessages,
