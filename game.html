@@ -3,59 +3,56 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>Brainrot Escape - Play</title>
+    <title>Molfoid Web Games</title>
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body, html { 
-            width: 100%; 
-            height: 100%; 
-            background-color: #000; 
-            overflow: hidden; 
-            position: fixed; /* Prevents bounce scrolling on mobile */
-            top: 0; 
-            left: 0; 
+            width: 100%; height: 100%; background-color: #000; overflow: hidden; 
+            position: fixed; top: 0; left: 0; 
         }
         #gameFrame {
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            border: none;
-            display: block;
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%; border: none; display: block;
         }
     </style>
 </head>
 <body>
-
-    <!-- 
-      Added allow="fullscreen; autoplay" for native feel.
-      Sandbox flags prevent ads and allow the game to run.
-    -->
     <iframe 
         id="gameFrame"
-        src="/api/proxy" 
+        src="about:blank" 
         sandbox="allow-scripts allow-same-origin allow-forms allow-pointer-lock allow-orientation-lock allow-fullscreen"
         allow="fullscreen; autoplay; gamepad"
         allowfullscreen>
     </iframe>
 
     <script>
-        // Auto-request fullscreen on first user interaction (click/touch)
-        const docEl = document.documentElement;
+        // 1. Get the game URL from the bot (?src=https://...)
+        const urlParams = new URLSearchParams(window.location.search);
+        const gameSrc = urlParams.get('src');
+        
         const iframe = document.getElementById('gameFrame');
 
-        function enterFullscreen() {
-            if (docEl.requestFullscreen) {
-                docEl.requestFullscreen().catch(() => {});
-            } else if (docEl.webkitRequestFullscreen) { /* Safari */
-                docEl.webkitRequestFullscreen();
+        // 2. Load the game
+        if (gameSrc) {
+            // Check if it's the h5games4u game (which needs the proxy)
+            if (gameSrc.includes('h5games4u.com')) {
+                // Point to your Vercel proxy, passing the target URL
+                iframe.src = `/api/proxy?url=${encodeURIComponent(gameSrc)}`;
+            } else {
+                // GameDistribution games don't block iframes, so load them directly!
+                iframe.src = gameSrc;
             }
-            // Remove listener so it only triggers once
+        } else {
+            document.body.innerHTML = '<h1 style="color:white;text-align:center;margin-top:20%">❌ No game specified.</h1>';
+        }
+
+        // 3. Auto Fullscreen
+        function enterFullscreen() {
+            if (document.documentElement.requestFullscreen) {
+                document.documentElement.requestFullscreen().catch(() => {});
+            }
             document.removeEventListener('click', enterFullscreen);
             document.removeEventListener('touchstart', enterFullscreen);
         }
-
         document.addEventListener('click', enterFullscreen);
         document.addEventListener('touchstart', enterFullscreen);
     </script>
