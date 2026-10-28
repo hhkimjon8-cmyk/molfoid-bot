@@ -1,1 +1,33 @@
 
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Molfoid GBA Emulator</title>
+    <style>
+        body, html { margin: 0; padding: 0; height: 100%; background: #000; overflow: hidden; }
+        #game { width: 100%; height: 100%; }
+    </style>
+</head>
+<body>
+    <div id="game"></div>
+    <script>
+        // Your exact raw GitHub base URL
+        const GITHUB_RAW_BASE = "https://raw.githubusercontent.com/hhkimjon8-cmyk/molfoid-bot/main/assets/";
+
+        const urlParams = new URLSearchParams(window.location.search);
+        const gameFile = urlParams.get('game');
+
+        if (gameFile) {
+            EJS_player = "#game";
+            EJS_core = "gba"; 
+            EJS_gameUrl = GITHUB_RAW_BASE + gameFile; 
+            EJS_pathtodata = "https://cdn.emulatorjs.org/stable/data/"; 
+        } else {
+            document.getElementById('game').innerHTML = '<h2 style="color:white;text-align:center;margin-top:20%">No game specified.</h2>';
+        }
+    </script>
+    <script src="https://cdn.emulatorjs.org/stable/data/loader.js"></script>
+</body>
+</html>
