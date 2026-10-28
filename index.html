@@ -6,23 +6,53 @@
     <title>Video Player Activity</title>
     <style>
         body { background: #000; color: #fff; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; font-family: sans-serif; }
-        video { width: 100%; max-width: 800px; max-height: 80vh; border-radius: 8px; box-shadow: 0 4px 15px rgba(0,0,0,0.5); }
+        video { width: 100%; max-width: 800px; max-height: 80vh; border-radius: 8px; box-shadow: 0 4px 15px rgba(0,0,0,0.5); display: none; }
         #status { margin-top: 10px; color: #aaa; font-size: 14px; }
+        .input-group { display: none; gap: 10px; margin-top: 20px; }
+        .input-group input { padding: 10px; border-radius: 5px; border: 1px solid #333; background: #222; color: #fff; width: 300px; outline: none; }
+        .input-group button { padding: 10px 20px; border-radius: 5px; border: none; background: #00ffcc; color: #000; font-weight: bold; cursor: pointer; }
     </style>
 </head>
 <body>
-    <video id="player" controls playsinline>
+    <video id="player" controls playsinline crossorigin="anonymous">
         <source id="videoSource" src="" type="video/mp4">
     </video>
     <div id="status">Waiting for video URL...</div>
+    
+    <!-- Fallback Input if URL is missing -->
+    <div class="input-group" id="manualInput">
+        <input type="text" id="urlInput" placeholder="Paste direct video URL here...">
+        <button onclick="loadManualUrl()">Play</button>
+    </div>
 
-    <!-- Discord Embedded App SDK -->
     <script src="https://cdn.jsdelivr.net/npm/@discord/embedded-app-sdk@1.0.0/dist/embedded-app-sdk.js"></script>
     <script>
+        let mediaUrl = null;
+        
+        // 1. Try to parse the URL from the query parameters
+        try {
+            const urlParams = new URLSearchParams(window.location.search);
+            mediaUrl = urlParams.get('url') || urlParams.get('videoUrl') || urlParams.get('src');
+            
+            // Fallback: check hash if not found
+            if (!mediaUrl && window.location.hash) {
+                const hashParams = new URLSearchParams(window.location.hash.substring(1));
+                mediaUrl = hashParams.get('url') || hashParams.get('videoUrl');
+            }
+        } catch (e) {
+            console.error("Error parsing URL", e);
+        }
+
+        // 2. Clean up the URL (fix missing colons and decode)
+        if (mediaUrl) {
+            try { mediaUrl = decodeURIComponent(mediaUrl); } catch(e){}
+            if (mediaUrl.startsWith('https//')) mediaUrl = mediaUrl.replace('https//', 'https://');
+            if (!mediaUrl.startsWith('http')) mediaUrl = 'https://' + mediaUrl;
+        }
+
         async function setup() {
-            // Try to initialize the Discord SDK (will fail silently if opened outside Discord)
             try {
-                // REPLACE 'YOUR_APP_ID' WITH YOUR ACTUAL DISCORD APPLICATION ID
+                // REPLACE 'YOUR_APP_ID' WITH YOUR ACTUAL DISCORD APP ID
                 const discordSdk = new window.DiscordSDK('YOUR_APP_ID'); 
                 await discordSdk.ready();
                 console.log("Discord SDK ready");
@@ -30,31 +60,46 @@
                 console.log("Not running inside Discord Activity, or App ID is missing.");
             }
 
-            // Parse the URL (your bot sends 'url', but we check 'videoUrl' just in case)
-            const urlParams = new URLSearchParams(window.location.search);
-            const videoUrl = urlParams.get('url') || urlParams.get('videoUrl');
-            
+            const videoElement = document.getElementById('player');
+            const sourceElement = document.getElementById('videoSource');
+            const statusElement = document.getElementById('status');
+            const manualInput = document.getElementById('manualInput');
+
+            if (mediaUrl) {
+                startPlayback(mediaUrl);
+            } else {
+                statusElement.innerText = "No video URL provided. Please paste it below:";
+                manualInput.style.display = 'flex';
+            }
+        }
+
+        function loadManualUrl() {
+            let url = document.getElementById('urlInput').value.trim();
+            if (url) {
+                if (url.startsWith('https//')) url = url.replace('https//', 'https://');
+                if (!url.startsWith('http')) url = 'https://' + url;
+                mediaUrl = url;
+                
+                document.getElementById('manualInput').style.display = 'none';
+                startPlayback(url);
+            }
+        }
+
+        function startPlayback(url) {
             const videoElement = document.getElementById('player');
             const sourceElement = document.getElementById('videoSource');
             const statusElement = document.getElementById('status');
 
-            if (videoUrl) {
-                let cleanUrl = videoUrl;
-                if (cleanUrl.startsWith('https//')) cleanUrl = cleanUrl.replace('https//', 'https://');
-                if (!cleanUrl.startsWith('http')) cleanUrl = 'https://' + cleanUrl;
-
-                sourceElement.src = cleanUrl;
-                videoElement.load();
-                statusElement.innerText = "Playing...";
-                
-                // Attempt to auto-play
-                videoElement.play().catch(e => {
-                    statusElement.innerText = "Click play to start.";
-                });
-            } else {
-                statusElement.innerText = "No video URL provided.";
-            }
+            sourceElement.src = url;
+            videoElement.style.display = 'block';
+            videoElement.load();
+            statusElement.innerText = "Playing...";
+            
+            videoElement.play().catch(e => {
+                statusElement.innerText = "Click play to start.";
+            });
         }
+
         setup().catch(console.error);
     </script>
 </body>
