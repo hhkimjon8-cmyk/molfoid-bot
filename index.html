@@ -17,8 +17,7 @@
         .btn:hover { filter: brightness(1.2); transform: translateY(-2px); }
         .toast { position: fixed; top: 20px; background: #222; padding: 10px 20px; border-radius: 8px; opacity: 0; transition: opacity 0.3s; font-size: 14px; z-index: 9999; pointer-events: none; }
         
-        /* Added styles for manual input fallback */
-        .input-group { display: none; gap: 10px; margin-bottom: 20px; width: 100%; max-width: 600px; }
+        .input-group { display: none; gap: 10px; margin-bottom: 20px; width: 100%; max-width: 600px; margin: 0 auto 20px auto; }
         .input-group input { flex: 1; padding: 12px; border-radius: 8px; border: 1px solid #394358; background: #1a2235; color: #fff; outline: none; font-size: 14px; }
         .input-group button { padding: 12px 20px; border-radius: 8px; border: none; background: #00ffcc; color: #000; font-weight: bold; cursor: pointer; }
     </style>
@@ -45,13 +44,10 @@
     <div class="toast" id="toast">Opening external player...</div>
 
     <script>
-        // Try to get URL from query params, then hash
         let mediaUrl = null;
         try {
             const urlParams = new URLSearchParams(window.location.search);
             mediaUrl = urlParams.get('url');
-            
-            // Fallback: try to parse from hash if not found in query
             if (!mediaUrl && window.location.hash) {
                 const hashParams = new URLSearchParams(window.location.hash.substring(1));
                 mediaUrl = hashParams.get('url');
@@ -60,7 +56,6 @@
             console.error("Failed to parse URL params", e);
         }
 
-        // Clean up the URL
         if (mediaUrl) {
             try { mediaUrl = decodeURIComponent(mediaUrl); } catch(e){}
             if (mediaUrl.startsWith('https//')) mediaUrl = mediaUrl.replace('https//', 'https://');
@@ -108,7 +103,7 @@
             const isAndroid = /android/i.test(userAgent);
             const isIOS = /iPad|iPhone|iPod/.test(userAgent) && !window.MSStream;
 
-            btnGroup.innerHTML = ''; // Clear existing buttons
+            btnGroup.innerHTML = ''; 
             btnGroup.style.display = 'flex';
 
             function addButton(label, href, isPrimary = false) {
@@ -121,10 +116,9 @@
             }
 
             const encodedUrl = encodeURIComponent(url);
-            const cleanUrl = url.replace('https://', '').replace('http://', '');
+            const cleanUrl = url.replace(/^https?:\/\//, '');
 
             if (isAndroid) {
-                // Android Intents (Requires the URL to NOT have https://)
                 addButton('▶️ Play in VLC', `intent://${cleanUrl}#Intent;package=org.videolan.vlc;type=video;scheme=https;end`, true);
                 addButton('▶️ Play in MX Player', `intent://${cleanUrl}#Intent;package=com.mxtech.videoplayer.ad;type=video;scheme=https;end`);
             } else if (isIOS) {
@@ -136,11 +130,10 @@
 
             addButton('🌐 Raw Link (Copy)', url);
 
-            // Auto-Redirect on Mobile to VLC after 2 seconds
+            // Auto-Redirect on Mobile to VLC after 1.5 seconds to attempt external playing
             if (isAndroid || isIOS) {
                 setTimeout(() => {
-                    const toast = document.getElementById('toast');
-                    toast.style.opacity = '1';
+                    document.getElementById('toast').style.opacity = '1';
                     
                     if (isAndroid) {
                         window.location.href = `intent://${cleanUrl}#Intent;package=org.videolan.vlc;type=video;scheme=https;end`;
@@ -148,8 +141,8 @@
                         window.location.href = `vlc-x-callback://x-callback-url/stream?url=${encodedUrl}`;
                     }
 
-                    setTimeout(() => { toast.style.opacity = '0'; }, 3000);
-                }, 2000);
+                    setTimeout(() => { document.getElementById('toast').style.opacity = '0'; }, 3000);
+                }, 1500);
             }
         }
     </script>
