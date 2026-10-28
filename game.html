@@ -6,45 +6,41 @@
     <title>Molfoid Web Games</title>
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
-        body, html { 
-            width: 100%; height: 100%; background-color: #000; overflow: hidden; 
-            position: fixed; top: 0; left: 0; 
-        }
-        #loading { color: white; font-family: sans-serif; text-align: center; margin-top: 40vh; }
+        body, html { width: 100%; height: 100%; background-color: #000; overflow: hidden; position: fixed; top: 0; left: 0; }
+        #gameFrame { width: 100%; height: 100%; border: none; display: block; }
+        #loading { color: white; font-family: sans-serif; text-align: center; margin-top: 40vh; position: absolute; width: 100%; z-index: 10; }
     </style>
 </head>
 <body>
     <div id="loading">🎮 Loading Game...</div>
+    
+    <!-- Sandbox allows scripts and saves, but blocks popups -->
+    <iframe id="gameFrame" src="about:blank" sandbox="allow-scripts allow-same-origin allow-forms allow-pointer-lock allow-orientation-lock allow-fullscreen" allow="fullscreen; autoplay; gamepad" allowfullscreen></iframe>
 
     <script>
-        // 1. Get the game URL from the bot (?src=https://...)
         const urlParams = new URLSearchParams(window.location.search);
         const gameSrc = urlParams.get('src');
         
         if (gameSrc) {
-            // 2. Fetch the proxied HTML
-            fetch(`/api/proxy?url=${encodeURIComponent(gameSrc)}`)
-                .then(res => res.text())
-                .then(html => {
-                    // 3. Overwrite the entire page with the game's HTML
-                    document.open();
-                    document.write(html);
-                    document.close();
-                    
-                    // 4. Auto Fullscreen on first click
-                    function enterFullscreen() {
-                        if (document.documentElement.requestFullscreen) {
-                            document.documentElement.requestFullscreen().catch(() => {});
-                        }
-                        document.removeEventListener('click', enterFullscreen);
-                        document.removeEventListener('touchstart', enterFullscreen);
-                    }
-                    document.addEventListener('click', enterFullscreen);
-                    document.addEventListener('touchstart', enterFullscreen);
-                })
-                .catch(err => {
-                    document.getElementById('loading').innerHTML = '❌ Failed to load game.';
-                });
+            const iframe = document.getElementById('gameFrame');
+            // Load the game through your proxy
+            iframe.src = `/api/proxy?url=${encodeURIComponent(gameSrc)}`;
+            
+            // Hide loading screen once the iframe loads
+            iframe.onload = () => {
+                document.getElementById('loading').style.display = 'none';
+            };
+
+            // Auto Fullscreen on first click
+            function enterFullscreen() {
+                if (document.documentElement.requestFullscreen) {
+                    document.documentElement.requestFullscreen().catch(() => {});
+                }
+                document.removeEventListener('click', enterFullscreen);
+                document.removeEventListener('touchstart', enterFullscreen);
+            }
+            document.addEventListener('click', enterFullscreen);
+            document.addEventListener('touchstart', enterFullscreen);
         } else {
             document.getElementById('loading').innerHTML = '❌ No game specified.';
         }
