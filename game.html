@@ -2,25 +2,62 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>Brainrot Escape - Play</title>
     <style>
-        body, html { margin: 0; padding: 0; width: 100%; height: 100%; background-color: #000; overflow: hidden; }
-        iframe { width: 100%; height: 100%; border: none; display: block; }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body, html { 
+            width: 100%; 
+            height: 100%; 
+            background-color: #000; 
+            overflow: hidden; 
+            position: fixed; /* Prevents bounce scrolling on mobile */
+            top: 0; 
+            left: 0; 
+        }
+        #gameFrame {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            border: none;
+            display: block;
+        }
     </style>
 </head>
 <body>
 
     <!-- 
-      src points to your Vercel API proxy (/api/proxy). 
-      The sandbox attribute blocks pop-up ads!
+      Added allow="fullscreen; autoplay" for native feel.
+      Sandbox flags prevent ads and allow the game to run.
     -->
     <iframe 
         id="gameFrame"
         src="/api/proxy" 
-        sandbox="allow-scripts allow-same-origin allow-forms allow-pointer-lock"
+        sandbox="allow-scripts allow-same-origin allow-forms allow-pointer-lock allow-orientation-lock allow-fullscreen"
+        allow="fullscreen; autoplay; gamepad"
         allowfullscreen>
     </iframe>
 
+    <script>
+        // Auto-request fullscreen on first user interaction (click/touch)
+        const docEl = document.documentElement;
+        const iframe = document.getElementById('gameFrame');
+
+        function enterFullscreen() {
+            if (docEl.requestFullscreen) {
+                docEl.requestFullscreen().catch(() => {});
+            } else if (docEl.webkitRequestFullscreen) { /* Safari */
+                docEl.webkitRequestFullscreen();
+            }
+            // Remove listener so it only triggers once
+            document.removeEventListener('click', enterFullscreen);
+            document.removeEventListener('touchstart', enterFullscreen);
+        }
+
+        document.addEventListener('click', enterFullscreen);
+        document.addEventListener('touchstart', enterFullscreen);
+    </script>
 </body>
 </html>
