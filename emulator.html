@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -13,9 +12,10 @@
 <body>
     <div id="game"></div>
     <script>
-        // Your exact raw GitHub base URL
+        // 1. MUST be raw.githubusercontent.com, NOT github.io
         const GITHUB_RAW_BASE = "https://raw.githubusercontent.com/hhkimjon8-cmyk/molfoid-bot/main/assets/";
 
+        // 2. The "game" parameter will be the encoded filename
         const urlParams = new URLSearchParams(window.location.search);
         const gameFile = urlParams.get('game');
 
