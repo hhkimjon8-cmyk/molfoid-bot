@@ -17,6 +17,8 @@
   "author": "prady",
   "license": "ISC",
   "dependencies": {
+    "@discordjs/opus": "^0.10.0",
+    "@discordjs/voice": "^0.19.2",
     "@distube/ytdl-core": "^4.16.12",
     "@pontalabs/ytdl": "^1.0.0",
     "axios": "^1.20.0",
@@ -24,6 +26,7 @@
     "cloudscraper": "^4.6.0",
     "discord.js": "^14.27.0",
     "dotenv": "^18.0.6",
+    "ffmpeg-static": "^5.3.0",
     "groq-sdk": "^1.6.0",
     "puppeteer": "^25.16.0",
     "yt-search": "^2.13.1",
