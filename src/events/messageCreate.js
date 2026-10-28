@@ -17,6 +17,7 @@ const { getPlaylist } = require('../utils/playlist');
 const { searchWallpapers } = require('../utils/wallpaper'); 
 const { searchIMDb } = require('../utils/tvshow'); 
 const { purgeMessages } = require('../utils/function'); 
+const { getGameList, getGameUrls } = require('../utils/emulator'); 
 
 process.env.YTDL_NO_UPDATE = '1';
 
@@ -234,7 +235,7 @@ module.exports = {
     if (message.author.bot || message.system) return;
 
     // ==========================================
-    // 🚨 PRO PREFIX COMMANDS (!ban, !warn, !github, !help) 🚨
+    // 🚨 PRO PREFIX COMMANDS (!ban, !warn, !game, !help) 🚨
     // ==========================================
     const PREFIX = '!';
     if (message.content.startsWith(PREFIX) && message.guild) {
@@ -251,6 +252,7 @@ module.exports = {
             { name: '🛠️ Moderation', value: '`!ban @user 1h [reason]` - Temp ban\n`!warn @user [reason]` - Log a warning\n`!purge 50` - Bulk delete msgs' },
             { name: '💻 Utilities', value: '`!github <repo_url>` - Latest release\n`!ping` - Bot latency' },
             { name: '🎵 Music', value: '`song <name>` - Search & play\n`playlist <name>` - Generate playlist\n`!play <name>` - Direct play' },
+            { name: '🎮 Games', value: '`!game` - List GBA games\n`!game <name>` - Play a GBA game' },
             { name: '🎬 Media', value: '`wallpaper <query>` - Find wallpapers\n`movie <query>` - Search IMDb\n`search <query> yt` - YouTube search' },
             { name: '🤖 AI Chat', value: 'Just mention me or send a DM! (Or use `reset` to clear memory)' }
           )
@@ -386,6 +388,51 @@ module.exports = {
         }
         return;
       }
+
+      // --- !game (GBA Emulator) ---
+      if (command === 'game' || command === 'playgame') {
+        const gameKey = args[0];
+        
+        // Show List of Games with Images
+        if (!gameKey) {
+          const games = await getGameList();
+          if (!games || games.length === 0) return message.reply("❌ No games available.");
+
+          // Create an embed for each game showing its image
+          const embeds = games.slice(0, 10).map(g => {
+            return new EmbedBuilder()
+              .setColor(0x8E33FF)
+              .setTitle(`🎮 ${g.name}`)
+              .setThumbnail(g.thumbnail || null)
+              .setDescription(`Type \`!game ${g.key}\` to play this game!`);
+          });
+          
+          return message.reply({ 
+            content: '🎮 **Available Games**', 
+            embeds: embeds 
+          });
+        }
+
+        // Show specific game launch buttons
+        const urls = getGameUrls(gameKey);
+        if (!urls) {
+          return message.reply(`❌ Game \`${gameKey}\` not found. Type \`!game\` to see the list.`);
+        }
+
+        const embed = new EmbedBuilder()
+          .setColor(0x00ffcc)
+          .setTitle(`🎮 ${urls.name}`)
+          .setThumbnail(urls.thumbnail || null) // Shows the game cover art!
+          .setDescription('Click the buttons below to launch the emulator in your browser!')
+          .setFooter({ text: 'Note: Multiplayer requires a public netplay server.' });
+
+        const row = new ActionRowBuilder().addComponents(
+          new ButtonBuilder().setLabel('🎮 Single Player').setStyle(ButtonStyle.Link).setURL(urls.singlePlayer),
+          new ButtonBuilder().setLabel('👥 Multiplayer').setStyle(ButtonStyle.Link).setURL(urls.multiPlayer)
+        );
+
+        return message.reply({ embeds: [embed], components: [row] });
+      }
     }
 
     // ==========================================
@@ -473,7 +520,7 @@ module.exports = {
         return message.reply({ embeds: [embed] });
       }
 
-            // ==========================================
+      // ==========================================
       // 1. WALLPAPER (Image Display)
       // ==========================================
       if (/^(wallpaper|wp)\s+(.+)$/i.test(prompt)) {
@@ -485,20 +532,19 @@ module.exports = {
         }
 
         let currentPage = 0;
-        const itemsPerPage = 5; // Show 5 images per page
+        const itemsPerPage = 5; 
         const totalPages = Math.ceil(allResults.length / itemsPerPage);
 
         const generateWallpaperPayload = (page) => {
           const start = page * itemsPerPage;
           const pageResults = allResults.slice(start, start + itemsPerPage);
 
-          // Create an embed for each image
           const embeds = pageResults.map((wp, index) => {
             const embed = new EmbedBuilder()
               .setColor(0x5865f2)
               .setTitle(`🖼️ ${wp.title}`)
               .setURL(wp.pageUrl)
-              .setImage(wp.imageUrl) // <--- DIRECT IMAGE DISPLAY
+              .setImage(wp.imageUrl) 
               .setFooter({ 
                text: `Resolution: ${wp.resolution || 'Unknown'} | Uploader: ${wp.uploader || 'Unknown'} | Image ${start + index + 1} of ${allResults.length}`
               });
