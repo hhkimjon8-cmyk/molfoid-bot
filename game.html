@@ -10,51 +10,44 @@
             width: 100%; height: 100%; background-color: #000; overflow: hidden; 
             position: fixed; top: 0; left: 0; 
         }
-        #gameFrame {
-            position: absolute; top: 0; left: 0; width: 100%; height: 100%; border: none; display: block;
-        }
+        #loading { color: white; font-family: sans-serif; text-align: center; margin-top: 40vh; }
     </style>
 </head>
 <body>
-    <iframe 
-        id="gameFrame"
-        src="about:blank" 
-        sandbox="allow-scripts allow-same-origin allow-forms allow-pointer-lock allow-orientation-lock allow-fullscreen"
-        allow="fullscreen; autoplay; gamepad"
-        allowfullscreen>
-    </iframe>
+    <div id="loading">🎮 Loading Game...</div>
 
     <script>
         // 1. Get the game URL from the bot (?src=https://...)
         const urlParams = new URLSearchParams(window.location.search);
         const gameSrc = urlParams.get('src');
         
-        const iframe = document.getElementById('gameFrame');
-
-        // 2. Load the game
         if (gameSrc) {
-            // Check if it's the h5games4u game (which needs the proxy)
-            if (gameSrc.includes('h5games4u.com')) {
-                // Point to your Vercel proxy, passing the target URL
-                iframe.src = `/api/proxy?url=${encodeURIComponent(gameSrc)}`;
-            } else {
-                // GameDistribution games don't block iframes, so load them directly!
-                iframe.src = gameSrc;
-            }
+            // 2. Fetch the proxied HTML
+            fetch(`/api/proxy?url=${encodeURIComponent(gameSrc)}`)
+                .then(res => res.text())
+                .then(html => {
+                    // 3. Overwrite the entire page with the game's HTML
+                    document.open();
+                    document.write(html);
+                    document.close();
+                    
+                    // 4. Auto Fullscreen on first click
+                    function enterFullscreen() {
+                        if (document.documentElement.requestFullscreen) {
+                            document.documentElement.requestFullscreen().catch(() => {});
+                        }
+                        document.removeEventListener('click', enterFullscreen);
+                        document.removeEventListener('touchstart', enterFullscreen);
+                    }
+                    document.addEventListener('click', enterFullscreen);
+                    document.addEventListener('touchstart', enterFullscreen);
+                })
+                .catch(err => {
+                    document.getElementById('loading').innerHTML = '❌ Failed to load game.';
+                });
         } else {
-            document.body.innerHTML = '<h1 style="color:white;text-align:center;margin-top:20%">❌ No game specified.</h1>';
+            document.getElementById('loading').innerHTML = '❌ No game specified.';
         }
-
-        // 3. Auto Fullscreen
-        function enterFullscreen() {
-            if (document.documentElement.requestFullscreen) {
-                document.documentElement.requestFullscreen().catch(() => {});
-            }
-            document.removeEventListener('click', enterFullscreen);
-            document.removeEventListener('touchstart', enterFullscreen);
-        }
-        document.addEventListener('click', enterFullscreen);
-        document.addEventListener('touchstart', enterFullscreen);
     </script>
 </body>
 </html>
