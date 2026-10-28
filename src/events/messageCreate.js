@@ -9,6 +9,24 @@ const {
 } = require('discord.js');
 const axios = require('axios');
 const fs = require('fs');
+const { spawn } = require('child_process'); 
+
+// ============================================================
+// Voice imports
+// ============================================================
+const {
+  joinVoiceChannel,
+  getVoiceConnection,
+  createAudioPlayer,
+  createAudioResource,
+  AudioPlayerStatus,
+  VoiceConnectionStatus,
+  entersState,
+  StreamType,
+} = require('@discordjs/voice');
+const ffmpegPath = require('ffmpeg-static');
+if (ffmpegPath) process.env.FFMPEG_PATH = ffmpegPath;
+
 const { askGroq } = require('../utils/groq');
 const { searchGif } = require('../utils/gif');
 const { searchMusicList, fetchSongByUrl, waitForFlac } = require('../utils/music');
@@ -19,6 +37,8 @@ const { searchIMDb } = require('../utils/tvshow');
 const { purgeMessages } = require('../utils/function'); 
 const { getGameList, getGameUrls } = require('../utils/emulator'); 
 const { getWebGameList, getWebGame } = require('../utils/webgame');
+const stremio = require('../utils/stremio');
+const { getMediaPlayerLinks } = require('../utils/media');
 
 process.env.YTDL_NO_UPDATE = '1';
 
@@ -33,6 +53,20 @@ const M4A_ATTACH_MAX     = 15 * 1024 * 1024;
 const M4A_TIMEOUT_MS     = 15000;            
 
 const flacDelivered = new Set();
+const voicePlayers = new Map();
+
+// Shared URL cleaner (intent:// → https://)
+function extractPlayUrl(streamData) {
+  let playUrl = streamData.url || '';
+  if (playUrl.startsWith('intent://')) {
+    const match = playUrl.match(/intent:\/\/(https?:\/\/[^#]+)/);
+    if (match) playUrl = match[1];
+    else playUrl = playUrl.split('#')[0].replace('intent://', '');
+  }
+  if (playUrl.startsWith('https//')) playUrl = playUrl.replace('https//', 'https://');
+  if (!playUrl.startsWith('http')) playUrl = 'https://' + playUrl;
+  return playUrl;
+}
 
 const STICKERS = {
   teasing: '123456789012345678', smug: '123456789012345678', pouting: '123456789012345678',
@@ -65,10 +99,6 @@ function safeFilename(title, ext = 'm4a') {
     .replace(/[\\/:*?"<>|｜：]/g, ' ')
     .replace(/\s+/g, ' ').trim().substring(0, 40);
   return `${base || 'audio'}.${ext}`;
-}
-
-function fmtMB(bytes) {
-  return (bytes / 1024 / 1024).toFixed(1);
 }
 
 function buildMusicEmbed(song, hasM4a = false, hasFlac = false, timerEnd = 0) {
@@ -235,9 +265,6 @@ module.exports = {
   async execute(message) {
     if (message.author.bot || message.system) return;
 
-    // ==========================================
-    // 🚨 PRO PREFIX COMMANDS (Server & DM Compatible) 🚨
-    // ==========================================
     let directPlaylistQuery = null;
 
     const PREFIX = '!';
@@ -254,6 +281,7 @@ module.exports = {
           .addFields(
             { name: '🛠️ Moderation (Servers Only)', value: '`!ban @user 1h [reason]` - Temp ban\n`!warn @user [reason]` - Log a warning\n`!purge 50` - Bulk delete msgs' },
             { name: '💻 Utilities', value: '`!github <repo_url>` - Latest release\n`!ping` - Bot latency' },
+            { name: '🎬 Stremio Addons', value: '`!stremio` - Browse addons & catalogs\n`!addon <url>` - Add custom manifest' },
             { name: '🎵 Music', value: '`!playlist <name>` - Generate playlist\n`song <name>` - Search & play\n`!play <name>` - Direct play' },
             { name: '🎮 Games', value: '`!game` - List GBA games\n`!game <name>` - Play a GBA game\n`!web game` - Play Web Games' },
             { name: '🎬 Media', value: '`wallpaper <query>` - Find wallpapers\n`movie <query>` - Search IMDb\n`search <query> yt` - YouTube search' },
@@ -268,28 +296,488 @@ module.exports = {
         return message.reply(`🏓 Pong! Latency: \`${Math.round(message.client.ws.ping)}ms\``);
       }
 
+      // --- !addon ---
+      if (command === 'addon') {
+        const url = args[0];
+        if (!url || !url.endsWith('.json')) return message.reply('❌ Provide a valid manifest URL ending in `.json`.');
+        const key = `custom_${Date.now()}`;
+        stremio.addCustomAddon(key, 'Custom Addon', url);
+        return message.reply(`✅ Added custom addon! Use \`!stremio\` to browse it.`);
+      }
+
+      // --- !stremio ---
+      if (command === 'stremio') {
+        const addonOptions = stremio.getAddons();
+        if (addonOptions.length === 0) return message.reply('❌ No addons loaded.');
+
+        let currentAddonUrl = null;
+        let manifestData = null;
+        let currentCatalogObj = null; 
+        let currentGenre = null;
+        let currentSkip = 0;
+        let currentCatalogItems = [];
+        let itemMap = new Map(); 
+        let streamMap = new Map();
+
+        const searchQuery = args.length > 1 && args[0].toLowerCase() === 'search' ? args.slice(1).join(' ') : null;
+
+        const select = new StringSelectMenuBuilder()
+          .setCustomId('stremio_addon_select')
+          .setPlaceholder('Select an Addon...')
+          .addOptions(addonOptions);
+
+        const row = new ActionRowBuilder().addComponents(select);
+        const embed = new EmbedBuilder()
+          .setColor(0x8E33FF)
+          .setTitle('🎬 Stremio Addon Explorer')
+          .setDescription(searchQuery ? `Searching for: **${searchQuery}**` : 'Select an addon to view its catalogs.');
+
+        const replyMsg = await message.reply({ embeds: [embed], components: [row] });
+
+        const collector = message.channel.createMessageComponentCollector({ 
+            filter: (i) => i.user.id === message.author.id,
+            time: 15 * 60 * 1000
+        });
+
+        collector.on('collect', async (i) => {
+          try {
+            if (!i.deferred && !i.replied) {
+                const isNavMenu = ['stremio_addon_select', 'stremio_catalog_select', 'stremio_genre_select', 'stremio_page_next', 'stremio_page_prev'].includes(i.customId);
+
+                if (isNavMenu) {
+                    await i.deferUpdate().catch(() => {});
+                } else if (i.customId === 'stremio_item_select' || i.customId.startsWith('vc_')) {
+                    await i.deferReply({ flags: 64 }).catch(() => {});
+                } else {
+                    await i.deferUpdate().catch(() => {});
+                }
+            }
+
+            // 1. NAVIGATION MENUS
+            if (['stremio_addon_select', 'stremio_catalog_select', 'stremio_genre_select', 'stremio_page_next', 'stremio_page_prev'].includes(i.customId)) {
+                if (i.customId === 'stremio_addon_select') {
+                    currentAddonUrl = stremio.getAddonUrl(i.values[0]);
+                    manifestData = await stremio.fetchManifest(currentAddonUrl);
+                    currentCatalogObj = null;
+                    currentGenre = null;
+                    currentSkip = 0;
+                    currentCatalogItems = [];
+                }
+                else if (i.customId === 'stremio_catalog_select') {
+                    const [catalogType, id] = i.values[0].split('|');
+                    currentCatalogObj = manifestData.catalogs.find(c => c.id === id && c.type === catalogType);
+                    currentGenre = null;
+                    currentSkip = 0;
+                    const extra = { skip: 0 };
+                    if (searchQuery) extra.search = searchQuery;
+                    currentCatalogItems = await stremio.fetchCatalog(currentAddonUrl, currentCatalogObj.type, currentCatalogObj.id, extra, currentCatalogObj.extra || []);
+                }
+                else if (i.customId === 'stremio_genre_select') {
+                    currentGenre = i.values[0] === 'all' ? null : i.values[0];
+                    currentSkip = 0;
+                    const extra = { skip: 0 };
+                    if (currentGenre) extra.genre = currentGenre;
+                    if (searchQuery) extra.search = searchQuery;
+                    currentCatalogItems = await stremio.fetchCatalog(currentAddonUrl, currentCatalogObj.type, currentCatalogObj.id, extra, currentCatalogObj.extra || []);
+                }
+                else if (i.customId === 'stremio_page_next') {
+                    currentSkip += 25;
+                    const extra = { skip: currentSkip };
+                    if (currentGenre) extra.genre = currentGenre;
+                    if (searchQuery) extra.search = searchQuery;
+                    currentCatalogItems = await stremio.fetchCatalog(currentAddonUrl, currentCatalogObj.type, currentCatalogObj.id, extra, currentCatalogObj.extra || []);
+                }
+                else if (i.customId === 'stremio_page_prev') {
+                    currentSkip = Math.max(0, currentSkip - 25);
+                    const extra = { skip: currentSkip };
+                    if (currentGenre) extra.genre = currentGenre;
+                    if (searchQuery) extra.search = searchQuery;
+                    currentCatalogItems = await stremio.fetchCatalog(currentAddonUrl, currentCatalogObj.type, currentCatalogObj.id, extra, currentCatalogObj.extra || []);
+                }
+
+                const components = [];
+
+                components.push(new ActionRowBuilder().addComponents(
+                    new StringSelectMenuBuilder().setCustomId('stremio_addon_select').setPlaceholder('Select an Addon...').addOptions(stremio.getAddons())
+                ));
+
+                if (manifestData) {
+                    const catOptions = manifestData.catalogs.map(c => ({ label: `${c.name || c.id}`, value: `${c.type}|${c.id}`, description: `Provider: ${c.type}` }));
+                    components.push(new ActionRowBuilder().addComponents(
+                        new StringSelectMenuBuilder().setCustomId('stremio_catalog_select').setPlaceholder('Select a Provider...').addOptions(catOptions.slice(0, 25))
+                    ));
+                }
+
+                if (currentCatalogObj) {
+                    const genreExtra = currentCatalogObj?.extra?.find(e => e.name === 'genre');
+                    if (genreExtra && genreExtra.options && genreExtra.options.length > 0) {
+                        const genreOptions = [{ label: 'All / default catalog', value: 'all', description: 'Show everything' }, ...genreExtra.options.map(opt => ({ label: opt, value: opt }))];
+                        components.push(new ActionRowBuilder().addComponents(
+                            new StringSelectMenuBuilder().setCustomId('stremio_genre_select').setPlaceholder('Select a Category...').addOptions(genreOptions.slice(0, 25))
+                        ));
+                    }
+                }
+
+                if (currentCatalogItems.length > 0) {
+                    itemMap.clear();
+                    currentCatalogItems.forEach((item, index) => itemMap.set(index, item));
+
+                    const itemOptions = currentCatalogItems.slice(0, 25).map((m, index) => ({
+                        label: (m.name || 'Untitled').substring(0, 100), value: String(index), description: (m.releaseInfo || 'Unknown Year').toString()
+                    }));
+                    components.push(new ActionRowBuilder().addComponents(
+                        new StringSelectMenuBuilder().setCustomId('stremio_item_select').setPlaceholder('Select a title...').addOptions(itemOptions)
+                    ));
+
+                    const pageRow = new ActionRowBuilder();
+                    if (currentSkip > 0) pageRow.addComponents(new ButtonBuilder().setCustomId('stremio_page_prev').setLabel('◀️ Prev').setStyle(ButtonStyle.Secondary));
+                    if (currentCatalogItems.length === 25) pageRow.addComponents(new ButtonBuilder().setCustomId('stremio_page_next').setLabel('Next ▶️').setStyle(ButtonStyle.Secondary));
+                    if (pageRow.components.length > 0) components.push(pageRow);
+                }
+
+                let content = '🎬 **Stremio Addon Explorer**\n';
+                if (manifestData) content += `Addon: **${manifestData.name}**\n`;
+                if (currentCatalogObj) content += `Catalog: **${currentCatalogObj.name || currentCatalogObj.id}**\n`;
+                if (currentGenre) content += `Genre: **${currentGenre}**\n`;
+                if (searchQuery) content += `Search: **${searchQuery}**\n`;
+
+                await i.editReply({ content, embeds: [], components }).catch(() => {});
+            }
+
+            // 2. ITEM SELECTION
+            else if (i.customId === 'stremio_item_select') {
+                const selectedIndex = parseInt(i.values[0], 10);
+                const item = itemMap.get(selectedIndex);
+                if (!item) return i.editReply({ content: '❌ Item not found.' }).catch(() => {});
+
+                const type = item.type || currentCatalogObj.type;
+                const id = item.id;
+
+                let meta = null;
+                try { meta = await stremio.fetchMeta(currentAddonUrl, type, id); } catch (e) { }
+
+                const finalTitle = meta?.name || item.name || 'Unknown Title';
+                const finalDesc = meta?.description || item.description || 'No description available.';
+                const finalPoster = meta?.poster || item.poster || null;
+                const finalYear = meta?.year || item.year || item.releaseInfo || 'N/A';
+                const finalGenres = meta?.genres ? meta.genres.join(', ') : 'N/A';
+
+                let finalCast = 'N/A';
+                if (meta?.cast && meta.cast.length > 0) finalCast = meta.cast.slice(0, 5).map(c => typeof c === 'string' ? c : c.name).join(', ');
+                else if (meta?.app_extras?.cast) finalCast = meta.app_extras.cast.slice(0, 5).map(c => c.name).join(', ');
+
+                const embed = new EmbedBuilder()
+                  .setColor(0x00FFCC)
+                  .setTitle(`🎬 ${finalTitle}`)
+                  .setDescription(finalDesc.substring(0, 500) + (finalDesc.length > 500 ? '...' : ''))
+                  .addFields(
+                    { name: 'Year', value: String(finalYear), inline: true },
+                    { name: 'Genres', value: finalGenres, inline: true },
+                    { name: 'Cast', value: finalCast, inline: false }
+                  );
+                if (finalPoster) embed.setImage(finalPoster);
+
+                if (meta && meta.videos && meta.videos.length > 0) {
+                    itemMap.clear(); 
+                    meta.videos.forEach((v, index) => itemMap.set(index, v));
+
+                    const epOptions = meta.videos.slice(0, 25).map((v, index) => ({
+                      label: `${v.season ? `S${v.season}E${v.episode} - ` : ''}${v.title || 'Episode'}`.substring(0, 100),
+                      value: String(index), 
+                      description: `Released: ${v.released || 'Unknown'}`
+                    }));
+
+                    const epSelect = new StringSelectMenuBuilder()
+                      .setCustomId('stremio_episode_select')
+                      .setPlaceholder('Select an Episode...')
+                      .addOptions(epOptions);
+
+                    await i.editReply({ embeds: [embed], components: [new ActionRowBuilder().addComponents(epSelect)] }).catch(() => {});
+                } else {
+                    await i.editReply({ embeds: [embed], components: [] }).catch(() => {});
+                    await fetchAndShowStreams(i, currentAddonUrl, type, id);
+                }
+            }
+
+            // 3. EPISODE SELECTION
+            else if (i.customId === 'stremio_episode_select') {
+                const epIndex = parseInt(i.values[0], 10);
+                const ep = itemMap.get(epIndex);
+                if (!ep) return i.editReply({ content: '❌ Episode not found.' }).catch(() => {});
+                await fetchAndShowStreams(i, currentAddonUrl, 'series', ep.id);
+            }
+
+            // 4. STREAM SELECTION (Play Buttons + Voice)
+            else if (i.customId === 'stremio_stream_select') {
+                const streamIndex = parseInt(i.values[0], 10);
+                const streamData = streamMap.get(streamIndex);
+                if (!streamData) return i.editReply({ content: '❌ Stream not found.' }).catch(() => {});
+
+                const playUrl = extractPlayUrl(streamData);
+                if (!playUrl || playUrl === 'https://' || playUrl === 'http://') {
+                    return i.editReply({ content: '❌ Invalid stream URL. Please try another server from the dropdown.' }).catch(() => {});
+                }
+
+                const fileTitle = (streamData.title || '').toLowerCase() + playUrl.toLowerCase();
+                const isMkv = fileTitle.includes('.mkv');
+
+                const vercelBase = 'https://molfoid-bot-j2b2.vercel.app';
+                const encodedUrl = encodeURIComponent(playUrl);
+                const encodedTitle = encodeURIComponent(streamData.title?.split('\n')[0] || 'Stream');
+                // Using your Vercel deployment
+                const videoPlayerUrl = `${vercelBase}/videord.html?url=${encodedUrl}&title=${encodedTitle}`;
+
+                const embed = new EmbedBuilder()
+                    .setColor(isMkv ? 0xFFA500 : 0x00FF00)
+                    .setTitle(isMkv ? '📺 MKV Stream (External Player Required)' : '📺 MP4 Stream (Playable in Discord)')
+                    .setDescription(`**Source:** ${streamData.title?.split('\n')[0] || 'Direct Stream'}`)
+                    .addFields(
+                        { name: 'Format', value: isMkv ? '⚠️ MKV (Discord cannot play this)' : '✅ MP4 (May play in Discord)', inline: true },
+                        { name: 'Size', value: streamData.behaviorHints?.videoSize ? `${(streamData.behaviorHints.videoSize / 1024 / 1024).toFixed(0)} MB` : 'Unknown', inline: true }
+                    );
+
+                let content = "";
+                if (videoPlayerUrl.length > 512) {
+                    content = `⚠️ **The direct link is too long for a button.**\nCopy the link below and paste it into your browser or player:\n\`\`\`\n${playUrl}\n\`\`\`\n`;
+                } else if (isMkv) {
+                    content = `⚠️ **This is an MKV file. Discord's native player does not support this format.**\n\n` +
+                              `**Use the external player buttons below, or stream the audio to a voice channel.**\n\n` +
+                              `**Direct Link:**\n${playUrl}`;
+                } else {
+                    content = `▶️ **Click the Play button on the video below to watch:**\n${playUrl}`;
+                }
+
+                // ---- Row 1: player buttons ----
+                const row1 = new ActionRowBuilder();
+                if (videoPlayerUrl.length <= 512) {
+                    row1.addComponents(
+                        new ButtonBuilder()
+                            .setLabel(isMkv ? '🌐 Open in Web Player' : '🌐 Open Stream')
+                            .setStyle(ButtonStyle.Link)
+                            .setURL(videoPlayerUrl)
+                    );
+                }
+
+                if (isMkv) {
+                    const vlcAndroidIntent = `intent://${playUrl.replace(/^https?:\/\//, '')}#Intent;package=org.videolan.vlc;type=video;scheme=https;end`;
+                    const mxPlayerIntent = `intent://${playUrl.replace(/^https?:\/\//, '')}#Intent;package=com.mxtech.videoplayer.ad;type=video;scheme=https;end`;
+                    const vlcIosIntent = `vlc-x-callback://x-callback-url/stream?url=${encodedUrl}`;
+
+                    if (vlcAndroidIntent.length < 512) {
+                        row1.addComponents(new ButtonBuilder().setLabel('📱 VLC (Auto)').setStyle(ButtonStyle.Link).setURL(`${vercelBase}/open.html?to=${encodeURIComponent(vlcAndroidIntent)}`));
+                    }
+                    if (mxPlayerIntent.length < 512) {
+                        row1.addComponents(new ButtonBuilder().setLabel('📱 MX Player').setStyle(ButtonStyle.Link).setURL(`${vercelBase}/open.html?to=${encodeURIComponent(mxPlayerIntent)}`));
+                    }
+                    if (vlcIosIntent.length < 512) {
+                        row1.addComponents(new ButtonBuilder().setLabel('🍎 VLC (iOS)').setStyle(ButtonStyle.Link).setURL(`${vercelBase}/open.html?to=${encodeURIComponent(vlcIosIntent)}`));
+                    }
+                }
+
+                // ---- Row 2: voice controls ----
+                const row2 = new ActionRowBuilder().addComponents(
+                    new ButtonBuilder()
+                        .setCustomId(`vc_play_${streamIndex}`)
+                        .setLabel('🔊 Play in Voice')
+                        .setStyle(ButtonStyle.Secondary),
+                    new ButtonBuilder()
+                        .setCustomId('vc_stop')
+                        .setLabel('⏹ Stop Voice')
+                        .setStyle(ButtonStyle.Danger)
+                );
+
+                // ---- Row 3: keep server switcher ----
+                const streamSelectBackup = new ActionRowBuilder().addComponents(
+                    new StringSelectMenuBuilder()
+                        .setCustomId('stremio_stream_select')
+                        .setPlaceholder('Change Stream Server...')
+                        .addOptions(
+                            Array.from(streamMap.values()).slice(0, 25).map((s, idx) => {
+                                let size = s.behaviorHints?.videoSize ? `[${(s.behaviorHints.videoSize / 1024 / 1024).toFixed(0)} MB] ` : '';
+                                let name = s.name?.split('•')[0] || 'Stream';
+                                return { label: `${idx+1}. ${size}${name}`.substring(0, 100), value: String(idx) };
+                            })
+                        )
+                );
+
+                const components = [];
+                if (row1.components.length > 0) components.push(row1);
+                components.push(row2);
+                components.push(streamSelectBackup);
+
+                await i.editReply({ content, embeds: [embed], components }).catch(() => {});
+            }
+
+            // 5. VOICE PLAY
+            else if (i.customId.startsWith('vc_play_')) {
+                const streamIndex = parseInt(i.customId.slice('vc_play_'.length), 10);
+                const streamData = streamMap.get(streamIndex);
+                if (!streamData) return i.editReply({ content: '❌ Stream not found.' }).catch(() => {});
+
+                if (!i.guild) {
+                    return i.editReply({ content: '❌ Voice playback is only available in servers.' }).catch(() => {});
+                }
+
+                let member = i.member;
+                if (!member || !member.voice || !member.voice.channel) {
+                    member = await i.guild.members.fetch(i.user.id).catch(() => null);
+                }
+                const voiceChannel = member?.voice?.channel;
+
+                if (!voiceChannel) {
+                    return i.editReply({ content: '❌ I cannot detect you in a voice channel. Make sure you are **connected** to a voice channel, then try again.' }).catch(() => {});
+                }
+
+                try {
+                    const playUrl = extractPlayUrl(streamData);
+
+                    let connection = getVoiceConnection(voiceChannel.guild.id);
+                    if (!connection) {
+                        connection = joinVoiceChannel({
+                            channelId: voiceChannel.id,
+                            guildId: voiceChannel.guild.id,
+                            adapterCreator: voiceChannel.guild.voiceAdapterCreator,
+                            selfDeaf: false,
+                            selfMute: false,
+                        });
+                    }
+
+                    try {
+                        await entersState(connection, VoiceConnectionStatus.Ready, 20_000);
+                    } catch (error) {
+                        connection.destroy();
+                        console.error("Voice Connection Timeout:", error.message);
+                        return i.editReply({ 
+                            content: `❌ **Voice connection timed out.**\nYour network/firewall might be blocking Discord Voice ports (UDP). If you are using a VPN or strict firewall, please disable it and try again.` 
+                        }).catch(() => {});
+                    }
+
+                    const previous = voicePlayers.get(voiceChannel.guild.id);
+                    if (previous) { try { previous.stop(); } catch {} }
+
+                    const ffmpegProcess = spawn(ffmpegPath, [
+                        '-reconnect', '1',
+                        '-reconnect_streamed', '1',
+                        '-reconnect_delay_max', '5',
+                        '-i', playUrl,
+                        '-vn', 
+                        '-f', 's16le',
+                        '-ar', '48000',
+                        '-ac', '2'
+                    ]);
+
+                    const player = createAudioPlayer();
+                    const resource = createAudioResource(ffmpegProcess.stdout, {
+                        inputType: StreamType.Raw,
+                        inlineVolume: true,
+                    });
+
+                    connection.subscribe(player);
+                    player.play(resource);
+                    voicePlayers.set(voiceChannel.guild.id, player);
+
+                    const cleanup = () => {
+                        voicePlayers.delete(voiceChannel.guild.id);
+                        if (ffmpegProcess) { try { ffmpegProcess.kill('SIGKILL'); } catch {} }
+                        try { connection.destroy(); } catch {}
+                    };
+                    
+                    player.on(AudioPlayerStatus.Idle, cleanup);
+                    player.on('error', (e) => {
+                        console.error('Voice playback error:', e);
+                        cleanup();
+                    });
+
+                    await i.editReply({
+                        content: `🔊 Now playing the **audio** of **${streamData.title?.split('\n')[0] || 'stream'}** in **${voiceChannel.name}**.\n*(Discord voice only carries audio — the video stays in the embed above.)*`
+                    }).catch(() => {});
+                } catch (err) {
+                    console.error('vc_play error:', err);
+                    await i.editReply({ content: `❌ Could not play in voice: ${err.message}` }).catch(() => {});
+                }
+            }
+
+            // 6. VOICE STOP
+            else if (i.customId === 'vc_stop') {
+                const connection = getVoiceConnection(i.guildId);
+                const player = voicePlayers.get(i.guildId);
+                if (player) { try { player.stop(); } catch {} voicePlayers.delete(i.guildId); }
+                if (connection) {
+                    try { connection.destroy(); } catch {}
+                    return i.editReply({ content: '⏹ Voice playback stopped.' }).catch(() => {});
+                }
+                return i.editReply({ content: '❌ I am not in a voice channel.' }).catch(() => {});
+            }
+
+          } catch (err) {
+            console.error("Stremio Error:", err);
+            if (err.code !== 40060) {
+               const msg = { content: `❌ Error: ${err.message}`, ephemeral: true };
+               if (i.deferred || i.replied) await i.followUp(msg).catch(()=>{});
+               else await i.reply(msg).catch(()=>{});
+            }
+          }
+        });
+
+        // Helper: Fetch Streams
+        async function fetchAndShowStreams(interaction, addonUrl, type, id) {
+            await interaction.editReply({ content: '⏳ Fetching streams...', embeds: [], components: [] }).catch(() => {});
+            try {
+                const streams = await stremio.fetchStreams(addonUrl, type, id);
+                const validStreams = streams.filter(s => s.url && (s.url.startsWith('http') || s.url.startsWith('intent://')));
+
+                if (validStreams.length === 0) {
+                    return interaction.editReply({ content: '❌ No direct streams found for this title.' }).catch(() => {});
+                }
+
+                streamMap.clear();
+                validStreams.forEach((s, i) => streamMap.set(i, s));
+
+                const streamOptions = validStreams.slice(0, 25).map((s, i) => {
+                    const lines = (s.title || '').split('\n');
+                    let server = 'Direct';
+                    const sourceLine = lines.find(l => l.includes('Source:'));
+                    if (sourceLine) {
+                        const parts = sourceLine.split('•');
+                        if (parts.length > 1) server = parts[parts.length - 1].trim();
+                    }
+                    const size = s.behaviorHints?.videoSize ? `${(s.behaviorHints.videoSize / 1024 / 1024).toFixed(0)} MB` : '';
+                    let label = `${i+1}. ${size ? `[${size}] ` : ''}${server}`.substring(0, 100);
+                    let desc = lines[1] ? lines[1].replace('🏷️ ', '').trim() : s.name || 'Click to play';
+                    return { label, value: String(i), description: desc.substring(0, 100) };
+                });
+
+                const streamSelect = new StringSelectMenuBuilder()
+                  .setCustomId('stremio_stream_select')
+                  .setPlaceholder('Select a stream to play...')
+                  .addOptions(streamOptions);
+
+                await interaction.editReply({ 
+                    content: `🎬 Found **${validStreams.length}** streams. Choose one from the dropdown below:`, 
+                    components: [new ActionRowBuilder().addComponents(streamSelect)] 
+                }).catch(() => {});
+            } catch (e) {
+                await interaction.editReply({ content: `❌ Failed to fetch streams: ${e.message}` }).catch(() => {});
+            }
+        }
+
+        return;
+      }
+
       // --- !playlist ---
       if (command === 'playlist') {
         const query = args.join(' ');
         if (!query) return message.reply('❌ Provide a playlist name. Usage: `!playlist lofi beats`');
-        directPlaylistQuery = query; // Pass this to the main logic below
+        directPlaylistQuery = query; 
       } 
       else if (command === 'game' || command === 'playgame') {
-        // --- !game (GBA Emulator) ---
         const gameKey = args[0];
-        
         if (!gameKey) {
           const games = await getGameList();
           if (!games || games.length === 0) return message.reply("❌ No games available.");
-
           const embeds = games.slice(0, 10).map(g => {
-            return new EmbedBuilder()
-              .setColor(0x8E33FF)
-              .setTitle(`🎮 ${g.name}`)
-              .setThumbnail(g.thumbnail || null)
-              .setDescription(`Type \`!game ${g.key}\` to play this game!`);
+            return new EmbedBuilder().setColor(0x8E33FF).setTitle(`🎮 ${g.name}`).setThumbnail(g.thumbnail || null).setDescription(`Type \`!game ${g.key}\` to play this game!`);
           });
-          
           return message.reply({ content: '🎮 **Available Games**', embeds: embeds });
         }
 
@@ -297,9 +785,7 @@ module.exports = {
         if (!urls) return message.reply(`❌ Game \`${gameKey}\` not found. Type \`!game\` to see the list.`);
 
         const embed = new EmbedBuilder()
-          .setColor(0x00ffcc)
-          .setTitle(`🎮 ${urls.name}`)
-          .setThumbnail(urls.thumbnail || null)
+          .setColor(0x00ffcc).setTitle(`🎮 ${urls.name}`).setThumbnail(urls.thumbnail || null)
           .setDescription('Click the buttons below to launch the emulator in your browser!')
           .setFooter({ text: 'Note: Multiplayer requires a public netplay server.' });
 
@@ -311,20 +797,14 @@ module.exports = {
         return message.reply({ embeds: [embed], components: [row] });
       }
       else if (command === 'web' && args[0] === 'game') {
-        // --- !web game (Dropdown Menu) ---
         const options = getWebGameList();
         if (!options || options.length === 0) return message.reply("❌ No web games available.");
 
-        const select = new StringSelectMenuBuilder()
-          .setCustomId('webgame_select')
-          .setPlaceholder('🕹️ Select a web game to play...')
-          .addOptions(options);
-
+        const select = new StringSelectMenuBuilder().setCustomId('webgame_select').setPlaceholder('🕹️ Select a web game to play...').addOptions(options);
         const row = new ActionRowBuilder().addComponents(select);
 
         const embed = new EmbedBuilder()
-          .setColor(0x8E33FF)
-          .setTitle('🌐 Web Games')
+          .setColor(0x8E33FF).setTitle('🌐 Web Games')
           .setDescription('Pick a game from the dropdown below to view its details and play!')
           .setFooter({ text: 'Games open in your web browser.' });
 
@@ -339,25 +819,15 @@ module.exports = {
           if (!game) return i.editReply({ content: '❌ Game not found.' });
 
           const gameEmbed = new EmbedBuilder()
-            .setColor(0x00ffcc)
-            .setTitle(`🕹️ ${game.name}`)
+            .setColor(0x00ffcc).setTitle(`🕹️ ${game.name}`)
             .setDescription(`${game.description}\n\nClick the button below to launch the game!`)
-            .setImage(game.thumbnail || null)
-            .setFooter({ text: 'Have fun!' });
+            .setImage(game.thumbnail || null).setFooter({ text: 'Have fun!' });
 
-          // Discord limits URLs to 512 chars. 
           let playUrl = `https://molfoid-bot-j2b2.vercel.app/game.html?src=${encodeURIComponent(game.url)}`;
-          
-          // If it's too long, fallback to the direct URL so it doesn't crash
-          if (playUrl.length > 512) {
-              playUrl = game.url;
-          }
+          if (playUrl.length > 512) playUrl = game.url;
 
           const playRow = new ActionRowBuilder().addComponents(
-            new ButtonBuilder()
-              .setLabel('🚀 Play Now')
-              .setStyle(ButtonStyle.Link)
-              .setURL(playUrl)
+            new ButtonBuilder().setLabel('🚀 Play Now').setStyle(ButtonStyle.Link).setURL(playUrl)
           );
 
           await i.editReply({ embeds: [gameEmbed], components: [playRow] });
@@ -435,9 +905,7 @@ module.exports = {
       }
     }
 
-    // ==========================================
     // BACKGROUND AUTO-SCANNER
-    // ==========================================
     setImmediate(async () => {
       try {
         const urlRegex = /(https?:\/\/(?:www\.)?(?:youtube\.com|youtu\.be)\/[^\s]+)/gi;
@@ -497,52 +965,33 @@ module.exports = {
         return message.reply("*sends a smug sticker* Tch... fine, I forgot everything we talked about. Happy now, idiot?");
       }
 
-      // ==========================================
-      // NATURAL LANGUAGE: PURGE
-      // ==========================================
       if (/^(delete|purge|clear)\s+(msg|messages?)\b/i.test(prompt)) {
         if (!isDM) return await purgeMessages(message, prompt);
       }
 
-      // ==========================================
-      // AUTO-PLAYLIST
-      // ==========================================
       if (prompt.toLowerCase() === 'auto playlist' || prompt.toLowerCase() === 'saved songs') {
         if (autoPlaylist.length === 0) {
           return message.reply("*sends a smug sticker* Tch... The playlist is empty. Drop some links or audio files, dummy.");
         }
         const list = autoPlaylist.slice(-10).map((url, i) => `**${i + 1}.** ${url}`).join('\n');
-        const embed = new EmbedBuilder()
-          .setColor(0x00ffcc).setTitle('🎶 Auto-Saved Public Playlist')
-          .setDescription(list).setFooter({ text: `Total links saved: ${autoPlaylist.length}` });
+        const embed = new EmbedBuilder().setColor(0x00ffcc).setTitle('🎶 Auto-Saved Public Playlist').setDescription(list).setFooter({ text: `Total links saved: ${autoPlaylist.length}` });
         return message.reply({ embeds: [embed] });
       }
 
-      // ==========================================
-      // 1. WALLPAPER
-      // ==========================================
       if (/^(wallpaper|wp)\s+(.+)$/i.test(prompt)) {
         const query = prompt.replace(/^(wallpaper|wp)\s+/i, '').trim();
         const allResults = await searchWallpapers(query);
-        
-        if (!allResults || allResults.length === 0) {
-          return message.reply(`*sends an annoyed sticker* Tch... I couldn't find any wallpapers for "${query}", idiot.`);
-        }
-
+        if (!allResults || allResults.length === 0) return message.reply(`*sends an annoyed sticker* Tch... I couldn't find any wallpapers for "${query}", idiot.`);
         let currentPage = 0;
         const itemsPerPage = 5; 
         const totalPages = Math.ceil(allResults.length / itemsPerPage);
-
         const generateWallpaperPayload = (page) => {
           const start = page * itemsPerPage;
           const pageResults = allResults.slice(start, start + itemsPerPage);
-
           const embeds = pageResults.map((wp, index) => {
-            return new EmbedBuilder()
-              .setColor(0x5865f2).setTitle(`🖼️ ${wp.title}`).setURL(wp.pageUrl).setImage(wp.imageUrl) 
+            return new EmbedBuilder().setColor(0x5865f2).setTitle(`🖼️ ${wp.title}`).setURL(wp.pageUrl).setImage(wp.imageUrl) 
               .setFooter({ text: `Resolution: ${wp.resolution || 'Unknown'} | Uploader: ${wp.uploader || 'Unknown'} | Image ${start + index + 1} of ${allResults.length}` });
           });
-
           const components = [];
           if (totalPages > 1) {
             components.push(new ActionRowBuilder().addComponents(
@@ -550,12 +999,9 @@ module.exports = {
               new ButtonBuilder().setCustomId('wp_next').setLabel('Next ▶️').setStyle(ButtonStyle.Secondary).setDisabled(page === totalPages - 1)
             ));
           }
-
           return { content: `*sends a smug sticker* Tch... here are some "${query}" wallpapers. (Page ${page + 1}/${totalPages})`, embeds: embeds, components: components };
         };
-
         const replyMsg = await message.reply(generateWallpaperPayload(currentPage));
-
         if (totalPages > 1) {
           const collector = replyMsg.createMessageComponentCollector();
           collector.on('collect', async (i) => {
@@ -567,15 +1013,10 @@ module.exports = {
         return;
       }
 
-      // ==========================================
-      // 2. IMDB
-      // ==========================================
       if (/^(movie|tv|show|film)\s+(.+)$/i.test(prompt)) {
         const query = prompt.replace(/^(movie|tv|show|film)\s+/i, '').trim();
         const allResults = await searchIMDb(query);
-        if (!allResults || allResults.length === 0) {
-          return message.reply(`*sends a pouting sticker* Tch... I couldn't find any movies or shows for "${query}", baka.`);
-        }
+        if (!allResults || allResults.length === 0) return message.reply(`*sends a pouting sticker* Tch... I couldn't find any movies or shows for "${query}", baka.`);
         let currentPage = 0;
         const itemsPerPage = 5;
         const totalPages = Math.ceil(allResults.length / itemsPerPage);
@@ -610,17 +1051,12 @@ module.exports = {
         return;
       }
 
-      // ==========================================
-      // 3. PLAYLIST
-      // ==========================================
       const isPlaylistRequest = directPlaylistQuery || (prompt.toLowerCase().includes('playlist') && !prompt.toLowerCase().includes('auto'));
       if (isPlaylistRequest) {
         let query = directPlaylistQuery ? directPlaylistQuery : prompt.replace(/\b(playlist|mix|make|a|of|the|music|songs?)\b/gi, '').replace(/\s+/g, ' ').trim();
         if (!query) query = prompt;
         const playlistData = await getPlaylist(query);
-        if (!playlistData) {
-          return message.reply(`*sends an angry sticker* Tch... I couldn't find any playlist for "${query}", idiot.`);
-        }
+        if (!playlistData) return message.reply(`*sends an angry sticker* Tch... I couldn't find any playlist for "${query}", idiot.`);
         let currentPage = 0;
         const itemsPerPage = 10;
         const totalPages = Math.ceil(playlistData.videos.length / itemsPerPage);
@@ -661,14 +1097,10 @@ module.exports = {
         return;
       }
 
-      // ==========================================
-      // 4. YOUTUBE SEARCH
-      // ==========================================
       if (/^(search|find)\s+(.+?)\s+yt$/i.test(prompt)) {
         const query = prompt.replace(/^(search|find)\s+/i, '').replace(/\s+yt$/i, '').trim();
         const results = await searchYouTube(query);
         if (results.length === 0) return message.reply(`*sends a pouting sticker* Tch... I couldn't find any YouTube video for "${query}", baka.`);
-        
         let currentPage = 0;
         const itemsPerPage = 5;
         const totalPages = Math.ceil(results.length / itemsPerPage);
@@ -712,9 +1144,6 @@ module.exports = {
         return;
       }
 
-      // ==========================================
-      // 5. YOUTUBE DIRECT
-      // ==========================================
       if (/ yt$/i.test(prompt)) {
         const query = prompt.replace(/ yt$/i, '').replace(/\b(give|me|play|search|find|download|the|a|song|music|mp3)\b/gi, '').replace(/\s+/g, ' ').trim() || prompt.replace(/ yt$/i, '').trim();
         const results = await searchYouTube(query);
@@ -724,9 +1153,6 @@ module.exports = {
         return await sendMusicReply(message, 'reply', song, '▶️ **High Quality Stream:**');
       }
 
-      // ==========================================
-      // 6. MAIN MUSIC SEARCH
-      // ==========================================
       const isMusicRequest = /\b(give|play|search|find|download)\b.*\b(song|music|mp3)\b/i.test(prompt) || /^play\s+/i.test(prompt) || prompt.toLowerCase().includes('song');
       if (isMusicRequest) {
         let query = prompt.replace(/\b(give|me|play|search|find|download|the|a|song|music|mp3)\b/gi, '').replace(/\s+/g, ' ').trim();
@@ -753,9 +1179,6 @@ module.exports = {
         return;
       }
 
-      // ==========================================
-      // 7. AI CHAT
-      // ==========================================
       let aiPrompt = prompt;
       if (otherMentions.size > 0) {
         const lastMention = Array.from(otherMentions.values()).pop();
