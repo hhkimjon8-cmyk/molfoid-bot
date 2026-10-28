@@ -1,0 +1,26 @@
+{
+    "brainrot": {
+        "name": "Brainrot Escape: Diamond Quest",
+        "description": "Escape the brainrot and find the diamonds! (Ad-Free)",
+        "url": "https://www.h5games4u.com/games/Brainrot-Escape-Diamond-Quest/index.html?cid=yyg",
+        "thumbnail": "https://www.yad.com/cdn-cgi/image/quality=78,format=auto/thumb/Brainrot-Escape-Diamond-Quest.jpg"
+    },
+    "worms": {
+        "name": "Worms Zone - A Slithery Snake",
+        "description": "Grow your worm, eat food, and dominate the arena!",
+        "url": "https://html5.gamedistribution.com/rvvASMiM/5dd0b18fb81d49da82ff459f08737390/index.html?gd_sdk_referrer_url=https%3A%2F%2Fwww.yad.com%2FWorms-Zone-A-Slithery-Snake&gd_zone_config=eyJwYXJlbnRVUkwiOiJodHRwczovL3d3dy55YWQuY29tL3dvcm1zLXpvbmUtYS1zbGl0aGVyeS1zbmFrZSIsInBhcmVudERvbWFpbiI6InlhZC5jb20iLCJ0b3BEb21haW4iOiJ5YWQuY29tIiwiaGFzSW1wcmVzc2lvbiI6dHJ1ZSwibG9hZGVyRW5hYmxlZCI6dHJ1ZSwiaG9zdCI6Imh0bWw1LmdhbWVkaXN0cmlidXRpb24uY29tIiwidmVyc2lvbiI6IjEuNS4xOCJ9",
+        "thumbnail": "https://worms.zone/img/logo.webp"
+    },
+    "krunker": {
+        "name": "Krunker.io",
+        "description": "A fast-paced multiplayer FPS in your browser.",
+        "url": "https://krunker.io",
+        "thumbnail": "https://upload.wikimedia.org/wikipedia/commons/thumb/e/e0/Krunker_logo.png/220px-Krunker_logo.png"
+    },
+    "just-Draw": {
+        "name": "Just Draw",
+        "description": "A simple drawing game for everyone!",
+        "url": "https://cdn.yad.com/Just-Draw/index.html?yad",
+        "thumbnail": "https://www.yad.com/cdn-cgi/image/quality=78,format=auto/thumb/Just-Draw.jpg"
+    }
+}
