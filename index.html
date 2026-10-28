@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Video Player Activity</title>
+    <style>
+        body { background: #000; color: #fff; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; font-family: sans-serif; }
+        video { width: 100%; max-width: 800px; max-height: 80vh; border-radius: 8px; box-shadow: 0 4px 15px rgba(0,0,0,0.5); }
+        #status { margin-top: 10px; color: #aaa; font-size: 14px; }
+    </style>
+</head>
+<body>
+    <video id="player" controls playsinline>
+        <source id="videoSource" src="" type="video/mp4">
+    </video>
+    <div id="status">Waiting for video URL...</div>
+
+    <!-- You must include the Discord Embedded App SDK -->
+    <script src="https://cdn.jsdelivr.net/npm/@discord/embedded-app-sdk@1.0.0/dist/embedded-app-sdk.js"></script>
+    <script>
+        // Initialize the Discord SDK (required for the Activity to load)
+        const discordSdk = new window.DiscordSDK('YOUR_APP_ID'); // Replace with your App ID
+        async function setup() {
+            await discordSdk.ready();
+            // The Activity URL will have the video link appended as a query parameter
+            const urlParams = new URLSearchParams(window.location.search);
+            const videoUrl = urlParams.get('videoUrl');
+            
+            const videoElement = document.getElementById('player');
+            const sourceElement = document.getElementById('videoSource');
+            const statusElement = document.getElementById('status');
+
+            if (videoUrl) {
+                sourceElement.src = videoUrl;
+                videoElement.load();
+                statusElement.innerText = "Playing...";
+                // Attempt to auto-play
+                videoElement.play().catch(e => {
+                    statusElement.innerText = "Click play to start.";
+                });
+            } else {
+                statusElement.innerText = "No video URL provided.";
+            }
+        }
+        setup().catch(console.error);
+    </script>
+</body>
+</html>
