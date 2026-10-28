@@ -3,7 +3,6 @@ const axios = require('axios');
 
 module.exports = async (req, res) => {
     try {
-        // Get the game URL from the ?url= parameter
         const targetUrl = req.query.url;
         
         if (!targetUrl) {
@@ -21,38 +20,47 @@ module.exports = async (req, res) => {
 
         let html = response.data;
 
-        // Inject <base> tag dynamically
+        // 1. Inject <base> tag so assets load correctly
         const urlObj = new URL(targetUrl);
         const baseHref = urlObj.origin + urlObj.pathname.substring(0, urlObj.pathname.lastIndexOf('/') + 1);
         if (html.includes('<head>')) {
             html = html.replace('<head>', `<head><base href="${baseHref}">`);
         }
 
-        // Strip CSP and inject the anti-popup nuke
+        // 2. Strip CSP tags
         html = html.replace(/<meta[^>]*http-equiv="Content-Security-Policy"[^>]*>/gi, '');
 
-        const antiIframeNuke = `
-        <style>#modal, .modal-overlay { display: none !important; opacity: 0 !important; pointer-events: none !important; }</style>
+        // 🚨 3. THE FIX: Ad Blocker & Fullscreen CSS 🚨
+        const injection = `
         <script>
-            const observer = new MutationObserver(() => {
-                const modal = document.getElementById('modal');
-                if (modal) modal.remove();
-            });
-            document.addEventListener('DOMContentLoaded', () => observer.observe(document.body, { childList: true, subtree: true }));
-            setInterval(() => {
-                const btn = document.getElementById('confirmBtn') || document.getElementById('closeBtn');
-                if (btn) btn.click();
-            }, 500);
+            // Block all popups and alerts
+            window.open = function() { return null; };
+            window.alert = function() {};
+            window.confirm = function() { return true; };
+            
+            // Instantly delete the iframe error popup if it somehow appears
+            setInterval(function() {
+                var modals = document.querySelectorAll('#modal, .modal-overlay, .modal');
+                modals.forEach(function(m) { m.remove(); });
+            }, 50);
         </script>
+        <style>
+            /* Hide the error modal */
+            #modal, .modal-overlay, .modal { display: none !important; opacity: 0 !important; visibility: hidden !important; pointer-events: none !important; z-index: -9999 !important; }
+            
+            /* Force Native Fullscreen Scaling */
+            html, body { width: 100% !important; height: 100% !important; margin: 0 !important; padding: 0 !important; overflow: hidden !important; background: #000 !important; }
+            #Game, #GameCanvas { width: 100% !important; height: 100% !important; display: block !important; top: 0 !important; left: 0 !important; }
+            canvas { object-fit: contain !important; }
+        </style>
         `;
 
         if (html.includes('<head>')) {
-            html = html.replace('<head>', '<head>' + antiIframeNuke);
+            html = html.replace('<head>', '<head>' + injection);
         }
 
         res.setHeader('Content-Type', 'text/html');
         res.setHeader('Access-Control-Allow-Origin', '*');
-        res.removeHeader('X-Frame-Options');
         
         res.status(200).send(html);
     } catch (error) {
