@@ -5,8 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Video Player Activity</title>
     <style>
-        body { background: #000; color: #fff; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; font-family: sans-serif; }
-        video { width: 100%; max-width: 800px; max-height: 80vh; border-radius: 8px; box-shadow: 0 4px 15px rgba(0,0,0,0.5); display: none; }
+        body { background: #000; color: #fff; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; font-family: sans-serif; overflow: hidden; }
+        video { width: 100%; max-width: 1000px; max-height: 80vh; border-radius: 8px; box-shadow: 0 4px 15px rgba(0,0,0,0.5); display: none; }
         #status { margin-top: 10px; color: #aaa; font-size: 14px; }
         .input-group { display: none; gap: 10px; margin-top: 20px; }
         .input-group input { padding: 10px; border-radius: 5px; border: 1px solid #333; background: #222; color: #fff; width: 300px; outline: none; }
@@ -19,22 +19,18 @@
     </video>
     <div id="status">Waiting for video URL...</div>
     
-    <!-- Fallback Input if URL is missing -->
     <div class="input-group" id="manualInput">
         <input type="text" id="urlInput" placeholder="Paste direct video URL here...">
         <button onclick="loadManualUrl()">Play</button>
     </div>
 
+    <!-- Discord Embedded App SDK -->
     <script src="https://cdn.jsdelivr.net/npm/@discord/embedded-app-sdk@1.0.0/dist/embedded-app-sdk.js"></script>
     <script>
         let mediaUrl = null;
-        
-        // 1. Try to parse the URL from the query parameters
         try {
             const urlParams = new URLSearchParams(window.location.search);
             mediaUrl = urlParams.get('url') || urlParams.get('videoUrl') || urlParams.get('src');
-            
-            // Fallback: check hash if not found
             if (!mediaUrl && window.location.hash) {
                 const hashParams = new URLSearchParams(window.location.hash.substring(1));
                 mediaUrl = hashParams.get('url') || hashParams.get('videoUrl');
@@ -43,7 +39,6 @@
             console.error("Error parsing URL", e);
         }
 
-        // 2. Clean up the URL (fix missing colons and decode)
         if (mediaUrl) {
             try { mediaUrl = decodeURIComponent(mediaUrl); } catch(e){}
             if (mediaUrl.startsWith('https//')) mediaUrl = mediaUrl.replace('https//', 'https://');
@@ -52,8 +47,8 @@
 
         async function setup() {
             try {
-                // REPLACE 'YOUR_APP_ID' WITH YOUR ACTUAL DISCORD APP ID
-                const discordSdk = new window.DiscordSDK('YOUR_APP_ID'); 
+                // Using your specific App ID
+                const discordSdk = new window.DiscordSDK('1557794760037769367'); 
                 await discordSdk.ready();
                 console.log("Discord SDK ready");
             } catch (e) {
