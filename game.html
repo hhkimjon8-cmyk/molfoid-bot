@@ -26,45 +26,51 @@
             text-align: center;
             padding: 20px;
         }
+        #error-message a {
+            color: #00ffcc;
+            font-size: 20px;
+            text-decoration: none;
+        }
     </style>
 </head>
 <body>
 
     <!-- 
-      The sandbox attribute is key here:
-      - allow-scripts: Lets the game run its JavaScript.
-      - allow-same-origin: Lets the game load assets from its own server.
-      - We OMIT 'allow-popups', which forcibly blocks all Adsterra pop-ups!
+        The sandbox attribute blocks ads:
+        - allow-scripts: Lets the game's JavaScript run.
+        - allow-same-origin: Lets the game load its own files.
+        - allow-forms & allow-pointer-lock: Needed for gameplay.
+        - We purposely OMIT 'allow-popups' to kill pop-under ads!
     -->
     <iframe 
         id="gameFrame"
-        src="https://cdn.yad.com/Brainrot-Escape-Diamond-Quest/index.html?yad"
+        src="https://www.h5games4u.com/games/Brainrot-Escape-Diamond-Quest/index.html?cid=yyg"
         sandbox="allow-scripts allow-same-origin allow-forms allow-pointer-lock"
         allowfullscreen>
     </iframe>
 
-    <!-- Fallback if the site blocks iframes -->
+    <!-- Fallback if the site blocks the iframe entirely -->
     <div id="error-message">
         <h2>⚠️ Game cannot be embedded.</h2>
         <p>The game server is blocking iframe connections.</p>
-        <a href="https://cdn.yad.com/Brainrot-Escape-Diamond-Quest/index.html?yad" target="_blank" style="color: #00ffcc; font-size: 20px;">
+        <a href="https://www.h5games4u.com/games/Brainrot-Escape-Diamond-Quest/index.html?cid=yyg" target="_blank">
             Click here to play in a new tab
         </a>
     </div>
 
     <script>
-        // Check if the iframe failed to load (X-Frame-Options block)
+        // This script detects if the iframe was blocked by X-Frame-Options
         const iframe = document.getElementById('gameFrame');
         
         setTimeout(() => {
             try {
-                // If the iframe body is empty, it was likely blocked by the website
+                // If we can't read the iframe's body, it means it loaded successfully (due to cross-origin rules)
                 if (iframe.contentDocument && iframe.contentDocument.body.innerHTML === "") {
                     iframe.style.display = 'none';
                     document.getElementById('error-message').style.display = 'block';
                 }
             } catch (e) {
-                // Cross-origin restrictions mean we can't read the iframe, which means it loaded!
+                // Cross-origin error means the game loaded properly
                 console.log("Game loaded successfully.");
             }
         }, 3000);
