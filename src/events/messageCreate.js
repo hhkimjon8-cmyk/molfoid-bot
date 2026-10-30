@@ -1090,7 +1090,12 @@ module.exports = {
           else if (i.customId === 'playlist_pick') {
             await i.deferUpdate();
             const picked = playlistData.videos[Number(i.values[0])];
-            const song = await fetchSongByUrl(picked.url);
+            // 🔥 FIX: Pass known info
+            const song = await fetchSongByUrl(picked.url, {
+                title: picked.title,
+                artist: picked.author,
+                duration: picked.duration
+            });
             if (song) await sendMusicReply(i, 'editReply', song, '▶️ **Now Playing:**');
             else await i.editReply({ content: '*sends a broken sticker* Failed to get the link.' });
           }
@@ -1137,7 +1142,13 @@ module.exports = {
           else if (i.customId === 'yt_search_pick') {
             await i.deferUpdate();
             const picked = results[Number(i.values[0])];
-            const song = await fetchSongByUrl(picked.url);
+            // 🔥 FIX: Pass known info
+            const song = await fetchSongByUrl(picked.url, {
+                title: picked.title,
+                artist: picked.author,
+                duration: picked.duration,
+                thumbnail: picked.thumbnail
+            });
             if (song) await sendMusicReply(i, 'editReply', song, '▶️ **High Quality Stream:**');
             else await i.editReply({ content: '*sends a broken sticker* Failed to get the link.' });
           }
@@ -1149,7 +1160,15 @@ module.exports = {
         const query = prompt.replace(/ yt$/i, '').replace(/\b(give|me|play|search|find|download|the|a|song|music|mp3)\b/gi, '').replace(/\s+/g, ' ').trim() || prompt.replace(/ yt$/i, '').trim();
         const results = await searchYouTube(query);
         if (results.length === 0) return message.reply(`*sends a pouting sticker* Tch... I couldn't find that on YouTube, baka.`);
-        const song = await fetchSongByUrl(results[0].url);
+        
+        // 🔥 FIX: Pass known info
+        const song = await fetchSongByUrl(results[0].url, {
+            title: results[0].title,
+            artist: results[0].author,
+            duration: results[0].duration,
+            thumbnail: results[0].thumbnail
+        });
+        
         if (!song) return message.reply({ content: '*sends a broken sticker* Failed to get the link.' });
         return await sendMusicReply(message, 'reply', song, '▶️ **High Quality Stream:**');
       }
@@ -1161,7 +1180,9 @@ module.exports = {
 
         const list = await searchMusicList(query);
         if (!list || list.length === 0) return message.reply(`*sends a pouting sticker* Tch... I couldn't find any song called "${query}", baka.`);
-        const first = await fetchSongByUrl(list[0].videoId);
+        
+        // 🔥 FIX: Pass known info
+        const first = await fetchSongByUrl(list[0].videoId, list[0]);
         if (!first) return message.reply("*sends a broken sticker* YouTube gave me garbage data. Try again later.");
 
         const molfoidText = `*sends a smug sticker* Tch... fine, here's "${query}". Don't expect me to do this every time, dummy.`;
@@ -1173,7 +1194,8 @@ module.exports = {
             if (i.user.id !== message.author.id) return i.reply({ content: "❌ This menu isn't for you, baka!", ephemeral: true });
             await i.deferUpdate();
             const picked = list[Number(i.values[0])];
-            const song = await fetchSongByUrl(picked.videoId);
+            // 🔥 FIX: Pass known info
+            const song = await fetchSongByUrl(picked.videoId, picked);
             if (song) await sendMusicReply(i, 'editReply', song, molfoidText, buildMusicRows(list));
           });
         }
