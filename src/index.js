@@ -1,7 +1,21 @@
 require('dotenv').config();
+const http = require('http'); // 🔥 Added for Render health check
 const { Client, Collection, GatewayIntentBits, Partials } = require('discord.js');
 const fs = require('fs');
 const path = require('path');
+
+// ==========================================
+// 0. Render Health Check Server
+// ==========================================
+// Render Web Services require an open port to pass the health scan.
+const PORT = process.env.PORT || 10000;
+const server = http.createServer((req, res) => {
+  res.writeHead(200, { 'Content-Type': 'text/plain' });
+  res.end('Molfoid Bot is online and running!\n');
+});
+server.listen(PORT, '0.0.0.0', () => {
+  console.log(`✅ Health check server listening on port ${PORT}`);
+});
 
 // ==========================================
 // 1. Environment Variables Safety Check
