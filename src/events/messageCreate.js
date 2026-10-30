@@ -24,8 +24,9 @@ const {
   entersState,
   StreamType,
 } = require('@discordjs/voice');
-const ffmpegPath = require('ffmpeg-static');
-if (ffmpegPath) process.env.FFMPEG_PATH = ffmpegPath;
+
+// 🔥 FIX: Removed ffmpeg-static requirement. Using system ffmpeg.
+const ffmpegPath = 'ffmpeg';
 
 const { askGroq } = require('../utils/groq');
 const { searchGif } = require('../utils/gif');
