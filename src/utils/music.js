@@ -71,7 +71,7 @@ function buildSlugCandidates(title) {
 }
 
 // ============================================================
-// Play URL (Pure Node.js)
+// Play URL
 // ============================================================
 async function getPlayUrl(ytUrl) {
   if (ytdlCore) {
@@ -117,7 +117,7 @@ async function probeFirstWorking(urls) {
 }
 
 // ============================================================
-// PURE NODE.JS: CutYT API Conversion (No Python/ffmpeg required)
+// PURE NODE.JS: CutYT API Conversion
 // ============================================================
 async function triggerCutytConversion(ytUrl) {
   try {
@@ -143,7 +143,7 @@ async function triggerCutytConversion(ytUrl) {
 }
 
 // ============================================================
-// Fast FLAC lookup (Cache + CDN)
+// Fast FLAC lookup
 // ============================================================
 async function findFlacFast(videoId, title) {
   const cached = cacheGet(videoId);
@@ -163,7 +163,7 @@ async function findFlacFast(videoId, title) {
 }
 
 // ============================================================
-// Background FLAC job (Pure Node.js)
+// Background FLAC job
 // ============================================================
 const pendingFlac = new Map();
 
@@ -172,15 +172,12 @@ function ensureFlac(videoId, ytUrl, title) {
 
   const task = (async () => {
     try {
-      // 1. Check if someone already converted it
       const quick = await findFlacFast(videoId, title);
       if (quick) return quick;
 
-      // 2. Trigger Azure API
       const reqOk = await triggerCutytConversion(ytUrl);
       if (!reqOk) return null;
 
-      // 3. Poll CDN for up to 90 seconds (Azure needs time to process)
       const candidates = buildSlugCandidates(title).map(s => `${FLAC_CDN}/${s}.flac`);
       for (let i = 0; i < 45; i++) {
         await sleep(2000);
@@ -224,26 +221,34 @@ async function searchMusicList(query) {
 }
 
 // ============================================================
-// fetchSongByUrl
+// fetchSongByUrl (Updated to accept knownInfo)
 // ============================================================
-async function fetchSongByUrl(urlOrId) {
+async function fetchSongByUrl(urlOrId, knownInfo = null) {
   try {
     const videoId = getVideoId(urlOrId);
     if (!videoId) throw new Error('Invalid Video ID');
     const ytUrl = `https://www.youtube.com/watch?v=${videoId}`;
 
-    let title = 'Unknown Title', artist = 'Unknown Artist';
-    let thumbnail = null, duration = 'Unknown';
+    // Use knownInfo if provided (fixes Render IP blocks)
+    let title = knownInfo?.title || 'Unknown Title';
+    let artist = knownInfo?.artist || 'Unknown Artist';
+    let thumbnail = knownInfo?.thumbnail || null;
+    let duration = knownInfo?.duration || 'Unknown';
 
-    try {
-      const v = await ytSearch({ videoId });
-      if (v?.title) {
-        title = v.title;
-        thumbnail = v.thumbnail;
-        artist = v.author?.name || 'Unknown Artist';
-        duration = v.timestamp;
+    // Only query YouTube if we don't already have the title
+    if (!knownInfo?.title) {
+      try {
+        const v = await ytSearch({ videoId });
+        if (v?.title) {
+          title = v.title;
+          thumbnail = v.thumbnail;
+          artist = v.author?.name || 'Unknown Artist';
+          duration = v.timestamp;
+        }
+      } catch (e) {
+        console.log(`⚠️ Metadata fetch failed for ${videoId}: ${e.message}`);
       }
-    } catch {}
+    }
 
     const [playUrl, fastFlac] = await Promise.all([
       getPlayUrl(ytUrl),
@@ -263,7 +268,7 @@ async function fetchSongByUrl(urlOrId) {
 
     return {
       videoId, title, url: ytUrl, thumbnail, playUrl,
-      downloadUrl, localPath: null, flacSize, // localPath is always null now
+      downloadUrl, localPath: null, flacSize,
       isFlac: !!downloadUrl,
       flacPending,
       singers: artist, author: artist, duration,
